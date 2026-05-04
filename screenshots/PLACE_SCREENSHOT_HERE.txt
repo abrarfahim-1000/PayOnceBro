@@ -1,0 +1,1 @@
+Place your screenshot of 'npm test' output here, named tests-passing.png
