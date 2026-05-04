@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import StatusButtons from '../../components/rider/StatusButtons.jsx'
+import DemandNotification from '../../components/rider/DemandNotification.jsx'
+import useRiderNotifications from '../../hooks/useRiderNotifications.js'
+import { UrlState } from '../../context/AuthContext.jsx'
 import { getProfile, getAssignments, getEarnings } from '../../services/riderService.js'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
@@ -9,11 +12,14 @@ import { Badge } from '../../components/ui/badge'
 
 const Dashboard = () => {
   const navigate = useNavigate()
+  const { user } = UrlState()
   const [assignments, setAssignments] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [riderProfile, setRiderProfile] = useState(null)
   const [earnings, setEarnings] = useState({ todayEarnings: 0, todayDeliveries: 0 })
+  const [dismissedNotifications, setDismissedNotifications] = useState(new Set())
+  const { notifications, markAsRead } = useRiderNotifications(user?.id)
 
   useEffect(() => {
     if (!error) return
@@ -55,6 +61,7 @@ const Dashboard = () => {
     )
   }
 
+
   if (loading) {
     return (
       <div className="text-center py-10 text-muted-foreground">
@@ -66,6 +73,29 @@ const Dashboard = () => {
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-semibold text-foreground">Rider Dashboard</h1>
+
+      {/* High-Demand Zone Notifications */}
+      {notifications && notifications.length > 0 && (
+        <div className="space-y-2">
+          {notifications
+            .filter(
+              notif =>
+                notif.type === 'high_demand_zone' &&
+                !notif.is_read &&
+                !dismissedNotifications.has(notif.id)
+            )
+            .map(notif => (
+              <DemandNotification
+                key={notif.id}
+                notification={notif}
+                onDismiss={(id) => {
+                  setDismissedNotifications(prev => new Set([...prev, id]))
+                }}
+                onMarkAsRead={markAsRead}
+              />
+            ))}
+        </div>
+      )}
 
       {/* Rider Profile Summary */}
       {riderProfile ? (
@@ -138,15 +168,19 @@ const Dashboard = () => {
 
                 {/* View Route and Status Update Buttons */}
                 <div className="flex gap-2 mb-4">
-                  {order.cluster_id && (
-                    <Button
-                      type="button"
-                      onClick={() => navigate(`/rider/route?clusterId=${order.cluster_id}`)}
-                      className="flex-1"
-                    >
-                      🗺️ View Route
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      if (order.cluster_id) {
+                        navigate(`/rider/route?clusterId=${order.cluster_id}`)
+                      } else {
+                        navigate(`/rider/route?orderId=${order.id}`)
+                      }
+                    }}
+                    className="flex-1"
+                  >
+                    🗺️ View Route
+                  </Button>
                 </div>
 
                 {/* Status Update Buttons */}

@@ -82,6 +82,14 @@ const OrderCard = ({ order, onStatusChange }) => {
           </div>
         )}
 
+        {/* Rider details (once assigned) */}
+        {order.rider && (
+          <div className="text-xs text-emerald-700 bg-emerald-50/50 border border-emerald-100 rounded-lg p-2.5 mt-1 leading-relaxed">
+            Assigned rider: <strong className="font-semibold text-emerald-900">{order.rider.fullName}</strong>
+            <span className="ml-2 text-emerald-800">⭐ {Number(order.rider.avgRating || 0).toFixed(1)}</span>
+          </div>
+        )}
+
         {/* Action buttons */}
         <div className="pt-2">
           <OrderActionButtons order={order} onStatusChange={onStatusChange} />

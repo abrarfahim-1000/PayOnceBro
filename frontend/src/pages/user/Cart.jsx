@@ -16,14 +16,17 @@
 // the CartContext and orderService.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useCart } from '../../context/CartContext'
+import { UrlState } from '../../context/AuthContext'
 import CartItem from '../../components/user/CartItem'
 import CartSummary from '../../components/user/CartSummary'
 import ClusterBanner from '../../components/user/ClusterBanner'
 import LocationPickerMap from '../../components/user/LocationPickerMap'
 import { placeOrder } from '../../services/orderService'
+import { updateSavedDeliveryLocation } from '../../services/authService'
+import { parseLatLng } from '../../utils/geoClient'
 import { toast } from 'sonner'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -35,6 +38,7 @@ const DHAKA_DEFAULT = { lat: 23.7808, lng: 90.4154 }
 
 const Cart = () => {
   const navigate = useNavigate()
+  const { user, fetchuser, isSessionLoaded } = UrlState()
   const {
     items,
     itemsByRestaurant,
@@ -56,6 +60,15 @@ const Cart = () => {
   const [manualLat, setManualLat] = useState('')
   const [manualLng, setManualLng] = useState('')
 
+  // Apply saved profile delivery location when available (overrides stale session storage).
+  useEffect(() => {
+    if (!isSessionLoaded || !user || user.role !== 'user') return
+    const lat = Number(user.delivery_lat)
+    const lng = Number(user.delivery_lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+    setUserLocation(lat, lng)
+  }, [isSessionLoaded, user?.id, user?.role, user?.delivery_lat, user?.delivery_lng, setUserLocation])
+
   // Keep the local "granted" indicator in sync with context (covers the case
   // where location was set by another page — e.g. the map picker on Search).
   useEffect(() => {
@@ -63,6 +76,14 @@ const Cart = () => {
       setLocationStatus('granted')
     }
   }, [userLocation])
+
+  const mapPickerInitialLocation = useMemo(() => {
+    const fromSession = parseLatLng(userLocation?.lat, userLocation?.lng)
+    if (fromSession) return fromSession
+    const saved = parseLatLng(user?.delivery_lat, user?.delivery_lng)
+    if (saved) return saved
+    return DHAKA_DEFAULT
+  }, [userLocation?.lat, userLocation?.lng, user?.delivery_lat, user?.delivery_lng])
 
   const requestLocation = () => {
     if (!navigator.geolocation) {
@@ -351,17 +372,24 @@ const Cart = () => {
       <LocationPickerMap
         isOpen={showMapPicker}
         onClose={() => setShowMapPicker(false)}
-        initialLocation={
-          Number.isFinite(userLocation?.lat) && Number.isFinite(userLocation?.lng)
-            ? { lat: userLocation.lat, lng: userLocation.lng }
-            : DHAKA_DEFAULT
-        }
-        onConfirm={(picked) => {
+        initialLocation={mapPickerInitialLocation}
+        onConfirm={async (picked) => {
           setUserLocation(picked.lat, picked.lng)
           setLocationStatus('granted')
-          toast.success(
-            `Location set: ${picked.lat.toFixed(4)}, ${picked.lng.toFixed(4)}`
-          )
+          if (user?.role === 'user') {
+            try {
+              await updateSavedDeliveryLocation({ lat: picked.lat, lng: picked.lng })
+              await fetchuser()
+              toast.success('Delivery location saved to your profile')
+            } catch {
+              toast.error('Could not save location to your profile')
+              return
+            }
+          } else {
+            toast.success(
+              `Location set: ${picked.lat.toFixed(4)}, ${picked.lng.toFixed(4)}`
+            )
+          }
         }}
       />
     </div>

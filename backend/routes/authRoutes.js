@@ -1,7 +1,8 @@
 import { Router } from 'express'
 import { rateLimit } from 'express-rate-limit'
-import { register, login, logout, getMe } from '../controllers/authController.js'
+import { register, login, logout, getMe, updateDeliveryLocation } from '../controllers/authController.js'
 import { protect } from '../middleware/authMiddleware.js'
+import { restrictTo } from '../middleware/roleMiddleware.js'
 
 const router = Router()
 
@@ -18,5 +19,6 @@ router.post('/register', authLimiter, register)
 router.post('/login', authLimiter, login)
 router.post('/logout', protect, logout)
 router.get('/me', protect, getMe)
+router.patch('/me/delivery-location', protect, restrictTo('user'), updateDeliveryLocation)
 
 export default router

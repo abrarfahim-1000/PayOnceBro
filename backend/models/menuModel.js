@@ -1,22 +1,39 @@
 import supabase from '../config/db.js'
 
+const clampInt = (v, def, min, max) => {
+  const n = parseInt(v, 10)
+  if (Number.isNaN(n)) return def
+  return Math.min(Math.max(n, min), max)
+}
+
+const matchesQuery = (item, q) => {
+  const name = item.name?.toLowerCase() ?? ''
+  const description = item.description?.toLowerCase() ?? ''
+  const category = item.category?.toLowerCase() ?? ''
+  const aiTags = Array.isArray(item.ai_tags)
+    ? item.ai_tags.map((tag) => String(tag).toLowerCase())
+    : []
+  return (
+    name.includes(q) ||
+    description.includes(q) ||
+    category.includes(q) ||
+    aiTags.some((tag) => tag.includes(q))
+  )
+}
+
 /**
  * searchItems — finds food items matching a search query + filters.
  *
- * Think of this like a librarian who goes into the database (our giant
- * filing cabinet of food info) and finds everything that matches what
- * you're looking for.
- *
  * @param {string} query      - what the user typed, e.g. "burger"
- * @param {object} filters    - { minPrice, maxPrice, cuisine }
- * @returns array of { menuItem, restaurant } objects
+ * @param {object} filters    - { minPrice, maxPrice, cuisine, limit, offset }
+ * @returns { items: rows[], meta: { hasMore: boolean } }
  */
 export const searchItems = async (query = '', filters = {}) => {
   const { minPrice, maxPrice, cuisine } = filters
+  const limit = clampInt(filters.limit, 50, 1, 100)
+  const offset = clampInt(filters.offset, 0, 0, 10_000)
   const q = query?.trim().toLowerCase() ?? ''
 
-  // Start building the database query
-  // We join menu_items WITH restaurants so we get location info too
   let dbQuery = supabase
     .from('menu_items')
     .select(`
@@ -39,60 +56,53 @@ export const searchItems = async (query = '', filters = {}) => {
         avg_prep_time
       )
     `)
-    .eq('is_available', true) // only show items that are available
+    .eq('is_available', true)
 
-  // Filter: only show items from active (open) restaurants
-  // The .not filter removes rows where restaurant is not active
-  // (Supabase doesn't support nested eq directly, so we filter after)
-
-  // Query text filtering is handled below in JS so we can include ai_tags matches too.
-
-  // Filter by minimum price
   if (minPrice !== undefined && minPrice !== null && minPrice !== '') {
     dbQuery = dbQuery.gte('price', Number(minPrice))
   }
 
-  // Filter by maximum price
   if (maxPrice !== undefined && maxPrice !== null && maxPrice !== '') {
     dbQuery = dbQuery.lte('price', Number(maxPrice))
   }
 
-  // Filter by cuisine/category (e.g. "pizza", "burger", "chinese")
   if (cuisine && cuisine.trim().length > 0) {
     dbQuery = dbQuery.ilike('category', `%${cuisine.trim()}%`)
   }
 
-  // Order by price ascending so cheapest shows first
-  dbQuery = dbQuery.order('price', { ascending: true }).limit(50)
+  dbQuery = dbQuery.order('price', { ascending: true })
 
-  const { data, error } = await dbQuery
+  if (!q) {
+    const { data, error } = await dbQuery.range(offset, offset + limit - 1)
+    if (error) throw error
+    const raw = data ?? []
+    const filtered = raw.filter((item) => item.restaurants && item.restaurants.is_active === true)
+    return {
+      items: filtered,
+      meta: {
+        hasMore: raw.length === limit,
+        nextOffset: offset + raw.length,
+      },
+    }
+  }
 
+  const poolCap = Math.min(400, Math.max(offset + limit + 80, 120))
+  const { data, error } = await dbQuery.range(0, poolCap - 1)
   if (error) throw error
+  const filtered = (data ?? [])
+    .filter((item) => item.restaurants && item.restaurants.is_active === true)
+    .filter((item) => matchesQuery(item, q))
 
-  // Filter out items from inactive restaurants (we do this in JS since
-  // Supabase doesn't easily filter on joined table columns)
-  const filtered = (data ?? []).filter(
-    (item) => item.restaurants && item.restaurants.is_active === true
-  )
+  const page = filtered.slice(offset, offset + limit)
+  const hasMore = offset + limit < filtered.length
 
-  // Search should match name, description, category, and AI tags.
-  if (!q) return filtered
-
-  return filtered.filter((item) => {
-    const name = item.name?.toLowerCase() ?? ''
-    const description = item.description?.toLowerCase() ?? ''
-    const category = item.category?.toLowerCase() ?? ''
-    const aiTags = Array.isArray(item.ai_tags)
-      ? item.ai_tags.map((tag) => String(tag).toLowerCase())
-      : []
-
-    return (
-      name.includes(q) ||
-      description.includes(q) ||
-      category.includes(q) ||
-      aiTags.some((tag) => tag.includes(q))
-    )
-  })
+  return {
+    items: page,
+    meta: {
+      hasMore,
+      nextOffset: offset + page.length,
+    },
+  }
 }
 
 /**
@@ -107,7 +117,6 @@ export const getCategories = async () => {
 
   if (error) throw error
 
-  // Get unique categories, remove nulls/empties
   const categories = [
     ...new Set(
       (data ?? [])
@@ -148,4 +157,72 @@ export const updateTags = async (itemId, tags = []) => {
 
   if (error) throw error
   return data
+}
+
+const MENU_WITH_RESTAURANT_SELECT = `
+  id,
+  name,
+  description,
+  price,
+  category,
+  is_available,
+  ai_tags,
+  restaurant_id,
+  restaurants (
+    id,
+    name,
+    address,
+    lat,
+    lng,
+    avg_rating,
+    is_active,
+    avg_prep_time
+  )
+`
+
+const filterActiveRestaurants = (rows) => {
+  return (rows ?? []).filter((item) => item.restaurants && item.restaurants.is_active === true)
+}
+
+export const getAvailableByIds = async (ids = []) => {
+  if (!Array.isArray(ids) || ids.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('menu_items')
+    .select(MENU_WITH_RESTAURANT_SELECT)
+    .eq('is_available', true)
+    .in('id', ids)
+
+  if (error) throw error
+  return filterActiveRestaurants(data)
+}
+
+export const getAvailableByRestaurantIds = async (restaurantIds = [], limit = 200) => {
+  if (!Array.isArray(restaurantIds) || restaurantIds.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('menu_items')
+    .select(MENU_WITH_RESTAURANT_SELECT)
+    .eq('is_available', true)
+    .in('restaurant_id', restaurantIds)
+    .order('price', { ascending: true })
+    .limit(limit)
+
+  if (error) throw error
+  return filterActiveRestaurants(data)
+}
+
+/**
+ * List available menu rows for admin AI tag backfill (id, name, description, ai_tags only).
+ */
+export const listMenuItemsForTaggingCandidates = async (maxRows = 500) => {
+  const cap = Math.min(Math.max(Number(maxRows) || 500, 1), 2000)
+  const { data, error } = await supabase
+    .from('menu_items')
+    .select('id, name, description, ai_tags')
+    .eq('is_available', true)
+    .limit(cap)
+
+  if (error) throw error
+  return data ?? []
 }

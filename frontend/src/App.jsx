@@ -1,40 +1,46 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { UrlProvider, UrlState } from './context/AuthContext';
 
-// Auth pages (Member D)
-import Auth from './pages/auth/Auth';
-
-// Restaurant pages (Member C)
-import RestaurantLayout from './layouts/RestaurantLayout';
-import RestaurantDashboard from './pages/restaurant/Dashboard';
-import MenuManagement from './pages/restaurant/MenuManagement';
-import RestaurantReviews from './pages/restaurant/Reviews';
-
-// User pages (Member A)
-import UserLayout from './layouts/UserLayout';
-import Home from './pages/user/Home';
-import RestaurantProfile from './pages/user/RestaurantProfile';
-import Cart from './pages/user/Cart';
-import Orders from './pages/user/Orders';
-
-// Protected route guard (Member D)
+// Kept eager: small guard + shell used on every navigation
 import ProtectedRoute from './components/common/ProtectedRoute';
-import RiderLayout from './layouts/RiderLayout';
-import RiderDashboard from './pages/rider/Dashboard';
-import RouteView from './pages/rider/RouteView';
-import Earnings from './pages/rider/Earnings';
-import AdminLayout from './layouts/AdminLayout';
-import Analytics from './pages/admin/Analytics';
 
 import { Toaster } from './components/ui/sonner';
-import OrderTracking from './pages/user/OrderTracking';
 import { getRoleHome } from './utils/roleHome';
+
+const Auth = lazy(() => import('./pages/auth/Auth'));
+
+const RestaurantLayout = lazy(() => import('./layouts/RestaurantLayout'));
+const RestaurantDashboard = lazy(() => import('./pages/restaurant/Dashboard'));
+const MenuManagement = lazy(() => import('./pages/restaurant/MenuManagement'));
+const RestaurantReviews = lazy(() => import('./pages/restaurant/Reviews'));
+
+const UserLayout = lazy(() => import('./layouts/UserLayout'));
+const Home = lazy(() => import('./pages/user/Home'));
+const RestaurantProfile = lazy(() => import('./pages/user/RestaurantProfile'));
+const Cart = lazy(() => import('./pages/user/Cart'));
+const Orders = lazy(() => import('./pages/user/Orders'));
+const OrderTracking = lazy(() => import('./pages/user/OrderTracking'));
+
+const RiderLayout = lazy(() => import('./layouts/RiderLayout'));
+const RiderDashboard = lazy(() => import('./pages/rider/Dashboard'));
+const RouteView = lazy(() => import('./pages/rider/RouteView'));
+const Earnings = lazy(() => import('./pages/rider/Earnings'));
+
+const AdminLayout = lazy(() => import('./layouts/AdminLayout'));
+const Analytics = lazy(() => import('./pages/admin/Analytics'));
+
+const RouteFallback = () => (
+  <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-600">
+    <p className="text-sm font-medium">Loading…</p>
+  </div>
+);
 
 function App() {
   return (
     <BrowserRouter>
       <UrlProvider>
+        <Suspense fallback={<RouteFallback />}>
         <Routes>
           {/* Auth page — Login & Register tabs */}
           <Route path="/" element={<SmartRedirect />} />
@@ -84,6 +90,7 @@ function App() {
           {/* Catch-all for 404s */}
           <Route path="*" element={<h1>404 - Not Found</h1>} />
         </Routes>
+        </Suspense>
         <Toaster position="top-right" richColors />
       </UrlProvider>
     </BrowserRouter>

@@ -179,9 +179,11 @@ export const getEarnings = async (req, res, next) => {
     const todayM = now.getMonth()
     const todayD = now.getDate()
 
-    // Calculate start of this week (Monday)
+    // Calculate start of this week (Monday). If today is Sunday (0), go back 6 days.
     const startOfWeek = new Date(now)
-    startOfWeek.setDate(now.getDate() - now.getDay() + 1)
+    const day = now.getDay()
+    const diffToMonday = day === 0 ? -6 : 1 - day
+    startOfWeek.setDate(now.getDate() + diffToMonday)
     startOfWeek.setHours(0, 0, 0, 0)
 
     // Calculate start of this month
@@ -334,6 +336,94 @@ export const getRoute = async (req, res, next) => {
     // Optimize route
     const routeData = optimizeRoute(stops, riderLocation)
 
+    res.json(routeData)
+  } catch (error) {
+    next(error)
+  }
+}
+
+/**
+ * getOrderRoute — Optimized pickup route for a single (non-cluster) assignment
+ *
+ * Request:  GET /api/rider/route/order/:orderId
+ * Auth:     JWT (rider)
+ * Params:   orderId
+ * Response: { orderedStops, mapsUrl, totalDistance }
+ */
+export const getOrderRoute = async (req, res, next) => {
+  try {
+    const { orderId } = req.params
+    const riderId = req.user.id
+
+    // Get rider's current location
+    const rider = await riderModel.getByUserId(riderId)
+    if (!rider) {
+      return res.status(404).json({ message: 'Rider not found' })
+    }
+
+    const riderLocation = {
+      lat: rider.current_lat,
+      lng: rider.current_lng,
+    }
+
+    // Get the order assigned to this rider
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .select('id, user_lat, user_lng, rider_id, status')
+      .eq('id', orderId)
+      .eq('rider_id', rider.id)
+      .in('status', ['accepted', 'preparing', 'pickup', 'on_the_way'])
+      .single()
+
+    if (orderError && orderError.code !== 'PGRST116') {
+      throw orderError
+    }
+
+    if (!order) {
+      return res.status(403).json({ message: 'You do not have an active order assigned to this id' })
+    }
+
+    // Get restaurants from order items
+    const { data: itemRows, error: itemsErr } = await supabase
+      .from('order_items')
+      .select('restaurant_id, restaurants ( id, name, lat, lng )')
+      .eq('order_id', order.id)
+
+    if (itemsErr) throw itemsErr
+
+    const restaurantMap = new Map()
+    ;(itemRows ?? []).forEach((row) => {
+      const r = row.restaurants
+      if (!r || !r.id) return
+      if (!restaurantMap.has(r.id)) {
+        restaurantMap.set(r.id, {
+          id: r.id,
+          name: r.name,
+          type: 'restaurant',
+          lat: r.lat,
+          lng: r.lng,
+        })
+      }
+    })
+
+    const restaurants = [...restaurantMap.values()]
+    if (restaurants.length === 0) {
+      return res.status(400).json({ message: 'No restaurants found for this order' })
+    }
+
+    // Build stops array: restaurants + customer
+    const stops = [
+      ...restaurants,
+      {
+        id: 'customer',
+        name: 'Customer Delivery Location',
+        type: 'customer',
+        lat: order.user_lat,
+        lng: order.user_lng,
+      },
+    ]
+
+    const routeData = optimizeRoute(stops, riderLocation)
     res.json(routeData)
   } catch (error) {
     next(error)

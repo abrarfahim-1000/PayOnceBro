@@ -2,61 +2,14 @@ import * as restaurantModel from '../models/restaurantModel.js'
 import * as menuModel from '../models/menuModel.js'
 import * as ratingModel from '../models/ratingModel.js'
 import { findBestRider } from '../services/riderAssignmentService.js'
-import { generateMenuTags, generateVibeSummary } from '../services/geminiService.js'
+import { generateMenuTags } from '../services/geminiService.js'
+import supabase from '../config/db.js'
+import { generateVibeSummary } from '../services/geminiService.js'
+import { buildMenuTags } from '../services/menuTaggingService.js'
 import { startSimulatedOrderFlow } from '../services/orderSimulationService.js'
 
 const VIBE_CACHE_TTL_MS = 60 * 60 * 1000
 const vibeCache = new Map()
-
-const inferFallbackTags = (name = '', description = '') => {
-  const text = `${name} ${description}`.toLowerCase()
-  const tags = new Set()
-  const hasMeat = /\b(beef|chicken|mutton|lamb|prawn|shrimp|fish|tuna|salmon)\b/.test(text)
-
-  if (/\bvegan\b|tofu|plant\s*-?\s*based/.test(text)) tags.add('vegan')
-  // Do not mark vegetarian when the same text clearly mentions meat.
-  if ((/\bvegetarian\b|paneer|veggie/.test(text) || (/vegetable/.test(text) && !hasMeat)) && !hasMeat) {
-    tags.add('vegetarian')
-  }
-  if (/\bhalal\b|beef|chicken|mutton|lamb/.test(text)) tags.add('halal')
-  if (/spicy|chili|chilli|hot\b|jalapeno|pepper/.test(text)) tags.add('spicy')
-  if (/\bmild\b|lightly\s+spiced|butter/.test(text)) tags.add('mild')
-  if (/sweet|dessert|cake|chocolate|honey|sugar/.test(text)) tags.add('sweet')
-  if (/gluten\s*-?\s*free|\bgf\b/.test(text)) tags.add('gluten-free')
-  if (/dairy\s*-?\s*free|lactose\s*-?\s*free/.test(text) || tags.has('vegan')) tags.add('dairy-free')
-  if (/high\s*-?\s*protein|protein\b|beef|chicken|egg/.test(text)) tags.add('high-protein')
-  if (/low\s*-?\s*calorie|salad|steamed|grilled/.test(text)) tags.add('low-calorie')
-
-  return Array.from(tags)
-}
-
-const getMenuTags = async (name = '', description = '') => {
-  const fallback = inferFallbackTags(name, description)
-  // #region agent log
-  fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H3',location:'backend/controllers/restaurantController.js:getMenuTags:entry',message:'Tag generation started with fallback precomputed',data:{nameLength:name.length,descriptionLength:description.length,fallbackTags:fallback,fallbackCount:fallback.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
-  try {
-    const aiTags = await generateMenuTags(name, description)
-    // #region agent log
-    fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H3',location:'backend/controllers/restaurantController.js:getMenuTags:afterAi',message:'AI tags returned from Gemini service',data:{aiTags:Array.isArray(aiTags)?aiTags:[],aiTagCount:Array.isArray(aiTags)?aiTags.length:0},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    if (Array.isArray(aiTags) && aiTags.length > 0) {
-      const merged = [...new Set([...aiTags, ...fallback])]
-      // #region agent log
-      fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H3',location:'backend/controllers/restaurantController.js:getMenuTags:merged',message:'Merged AI and fallback tags',data:{mergedTags:merged,mergedCount:merged.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      return merged
-    }
-  } catch {
-    // Fallback below
-  }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H4',location:'backend/controllers/restaurantController.js:getMenuTags:fallbackOnly',message:'Using fallback tags only',data:{fallbackTags:fallback,fallbackCount:fallback.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-  return fallback
-}
 
 const getDefaultRestaurantName = (email) => {
   const fallback = 'My Restaurant'
@@ -152,11 +105,50 @@ export const getOrders = async (req, res, next) => {
       return acc
     }, {})
 
+    const riderIds = [...new Set(allOrders.map((o) => o.rider_id).filter(Boolean))]
+    let riderMap = {}
+
+    if (riderIds.length > 0) {
+      const { data: riders, error: riderErr } = await supabase
+        .from('riders')
+        .select('id, user_id, avg_rating')
+        .in('id', riderIds)
+
+      if (riderErr) throw riderErr
+
+      const userIds = [...new Set((riders ?? []).map((r) => r.user_id).filter(Boolean))]
+      let profileMap = {}
+
+      if (userIds.length > 0) {
+        const { data: profiles, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, username')
+          .in('id', userIds)
+
+        if (profileErr) throw profileErr
+        profileMap = (profiles ?? []).reduce((acc, p) => {
+          acc[p.id] = p
+          return acc
+        }, {})
+      }
+
+      riderMap = (riders ?? []).reduce((acc, r) => {
+        const profile = profileMap[r.user_id] || {}
+        acc[r.id] = {
+          id: r.id,
+          fullName: profile.full_name || profile.username || 'Rider',
+          avgRating: r.avg_rating ?? 0,
+        }
+        return acc
+      }, {})
+    }
+
     const enriched = allOrders.map((order) => ({
       ...order,
       myItems: itemsByOrder[order.id] ?? [],
       isClusteredOrder: !!order.cluster_id,
       cluster: order.cluster_id ? (clustersMap[order.cluster_id] ?? null) : null,
+      rider: order.rider_id ? riderMap[order.rider_id] ?? null : null,
       // Used by the frontend PrepTimer — starts counting down on 'accepted'
       restaurantPrepTime: restaurant.avg_prep_time ?? 30,
     }))
@@ -270,11 +262,8 @@ export const addMenuItem = async (req, res, next) => {
 
     let taggedItem = item
     try {
-      const tags = await getMenuTags(item.name, item.description)
+      const tags = await buildMenuTags(item.name, item.description)
       taggedItem = await menuModel.updateTags(item.id, tags)
-      // #region agent log
-      fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H5',location:'backend/controllers/restaurantController.js:addMenuItem:dbWrite',message:'Tags written to menu item',data:{itemId:item.id,savedTags:Array.isArray(taggedItem?.ai_tags)?taggedItem.ai_tags:[],savedTagCount:Array.isArray(taggedItem?.ai_tags)?taggedItem.ai_tags.length:0},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
     } catch {
       // Menu write should still succeed even if AI tagging fails.
     }
@@ -311,7 +300,7 @@ export const editMenuItem = async (req, res, next) => {
 
     let taggedItem = item
     try {
-      const tags = await getMenuTags(item.name, item.description)
+      const tags = await buildMenuTags(item.name, item.description)
       taggedItem = await menuModel.updateTags(item.id, tags)
     } catch {
       // Keep successful menu updates even if Gemini is unavailable.

@@ -16,6 +16,9 @@ import ratingRoutes from './routes/ratingRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import publicRestaurantRoutes from './routes/publicRestaurantRoutes.js';
 import orderTrackingRoutes    from './routes/orderTrackingRoutes.js';
+import * as demandService from './services/demandService.js'
+import recommendationRoutes from './routes/recommendationRoutes.js';
+import aiRoutes from './routes/aiRoutes.js';
 
 const app = express();
 
@@ -60,6 +63,15 @@ app.use('/api/ratings',     ratingRoutes);
 app.use('/api/admin',       adminRoutes);
 app.use('/api/public/restaurants', publicRestaurantRoutes);
 app.use('/api/order-tracking',     orderTrackingRoutes);
+app.use('/api/recommendations',    recommendationRoutes);
+app.use('/api/ai',                 aiRoutes);
 app.use(errorHandler);
+
+// Background job: Analyze demand zones every 3 minutes
+const DEMAND_ANALYSIS_INTERVAL = 3 * 60 * 1000 // 3 minutes
+setInterval(() => {
+  demandService.analyzeZones().catch(err => console.error('Demand analysis job failed:', err))
+}, DEMAND_ANALYSIS_INTERVAL)
+console.log('✅ Demand zone analysis background job scheduled (every 30 minutes)')
 
 export default app;

@@ -252,6 +252,14 @@ const Orders = () => {
                   )}
                 </div>
 
+                {/* Rider details */}
+                {order.rider && (
+                  <div className="px-4 pb-4 text-xs text-emerald-700">
+                    Rider: <span className="font-semibold text-emerald-900">{order.rider.fullName}</span>
+                    <span className="ml-2">⭐ {Number(order.rider.avgRating || 0).toFixed(1)}</span>
+                  </div>
+                )}
+
                 {/* Rate Rider row (Member 2 integration — preserved verbatim behavior) */}
                 {showRate && (
                   <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">

@@ -40,6 +40,9 @@ const SearchBar = ({ onSearch, categories = [], loading = false }) => {
   // keystroke. Like waiting for someone to finish talking before responding!
   useEffect(() => {
     clearTimeout(debounceRef.current)
+    const idle =
+      !query && !minPrice && !maxPrice && !cuisine && !location
+    const delay = idle ? 0 : 400
     debounceRef.current = setTimeout(() => {
       onSearch(query, {
         minPrice: minPrice || undefined,
@@ -48,7 +51,7 @@ const SearchBar = ({ onSearch, categories = [], loading = false }) => {
         userLat: location?.lat,
         userLng: location?.lng,
       })
-    }, 400)
+    }, delay)
 
     return () => clearTimeout(debounceRef.current)
   }, [query, minPrice, maxPrice, cuisine, location, onSearch])

@@ -84,7 +84,7 @@ export const getOrderItemsByRestaurant = async (restaurantId) => {
 export const getActiveOrdersByIds = async (orderIds) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, status, total_price, delivery_fee, estimated_time, cluster_id, created_at')
+    .select('id, status, total_price, delivery_fee, estimated_time, cluster_id, rider_id, created_at')
     .in('id', orderIds)
     .in('status', ['pending', 'accepted', 'preparing', 'pickup'])
     .order('created_at', { ascending: false })
@@ -97,7 +97,7 @@ export const getCompletedOrdersByIds = async (orderIds) => {
   todayStart.setHours(0, 0, 0, 0)
   const { data, error } = await supabase
     .from('orders')
-    .select('id, status, total_price, delivery_fee, estimated_time, cluster_id, created_at')
+    .select('id, status, total_price, delivery_fee, estimated_time, cluster_id, rider_id, created_at')
     .in('id', orderIds)
     .eq('status', 'delivered')
     .gte('created_at', todayStart.toISOString())

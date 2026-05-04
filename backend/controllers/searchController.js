@@ -1,6 +1,9 @@
 import * as menuModel from '../models/menuModel.js'
-import { sortByProximity } from '../services/clusteringService.js'
+import * as restaurantModel from '../models/restaurantModel.js'
+import { findClusters, sortByProximity } from '../services/clusteringService.js'
 import { haversineDistance } from '../utils/geoUtils.js'
+
+const MAP_CLUSTER_PALETTE = ['#059669', '#7c3aed', '#ea580c', '#0284c7', '#ca8a04']
 
 /**
  * GET /api/search
@@ -14,10 +17,18 @@ import { haversineDistance } from '../utils/geoUtils.js'
  */
 export const search = async (req, res, next) => {
   try {
-    const { q = '', minPrice, maxPrice, cuisine, userLat, userLng } = req.query
+    const { q = '', minPrice, maxPrice, cuisine, userLat, userLng, limit, offset } = req.query
 
-    // Step 1: Get matching food items from the database
-    const items = await menuModel.searchItems(q, { minPrice, maxPrice, cuisine })
+    const pageLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100)
+    const pageOffset = Math.min(Math.max(parseInt(offset, 10) || 0, 0), 10_000)
+
+    const { items: rawItems, meta } = await menuModel.searchItems(q, {
+      minPrice,
+      maxPrice,
+      cuisine,
+      limit: pageLimit,
+      offset: pageOffset,
+    })
 
     // Step 2: Add distance info if user's location was provided
     const userLatNum = parseFloat(userLat)
@@ -27,7 +38,7 @@ export const search = async (req, res, next) => {
     // Step 3: Enrich each item with distance and cluster eligibility
     const CLUSTER_RADIUS_KM = parseFloat(process.env.CLUSTER_RADIUS_KM) || 2
 
-    const enriched = items.map((item) => {
+    const enriched = rawItems.map((item) => {
       const restaurant = item.restaurants
       let distanceKm = null
       let isClusterEligible = false
@@ -74,7 +85,12 @@ export const search = async (req, res, next) => {
       ? sortByProximity(enriched, userLatNum, userLngNum)
       : [...enriched].sort((a, b) => a.menuItem.price - b.menuItem.price)
 
-    res.json({ results: sorted, total: sorted.length })
+    res.json({
+      results: sorted,
+      total: sorted.length,
+      hasMore: Boolean(meta?.hasMore),
+      nextOffset: meta?.nextOffset ?? pageOffset + sorted.length,
+    })
   } catch (err) {
     next(err)
   }
@@ -88,6 +104,52 @@ export const getCategories = async (req, res, next) => {
   try {
     const categories = await menuModel.getCategories()
     res.json({ categories })
+  } catch (err) {
+    next(err)
+  }
+}
+
+/**
+ * GET /api/search/map
+ * Active restaurants with lat/lng for the location-picker map, plus cluster
+ * polylines using the same findClusters logic as the rest of the app.
+ */
+export const getSearchMap = async (req, res, next) => {
+  try {
+    const radiusKm = parseFloat(process.env.CLUSTER_RADIUS_KM) || 2
+    const all = await restaurantModel.getAllActive()
+    const clusters = findClusters(all, radiusKm)
+
+    const restaurantClusterIndex = new Map()
+    clusters.forEach((c, idx) => {
+      c.restaurants.forEach((r) => {
+        if (r?.id) restaurantClusterIndex.set(r.id, idx)
+      })
+    })
+
+    const restaurants = all.map((r) => ({
+      id: r.id,
+      name: r.name,
+      lat: r.lat,
+      lng: r.lng,
+      avgRating: r.avg_rating ?? null,
+      address: r.address ?? null,
+      clusterIndex: restaurantClusterIndex.has(r.id) ? restaurantClusterIndex.get(r.id) : null,
+    }))
+
+    const clusterPolylines = clusters.map((c, idx) => ({
+      key: `cluster-${idx}`,
+      color: MAP_CLUSTER_PALETTE[idx % MAP_CLUSTER_PALETTE.length],
+      positions: c.restaurants
+        .filter((r) => r.lat != null && r.lng != null)
+        .map((r) => [Number(r.lat), Number(r.lng)]),
+    }))
+
+    res.json({
+      restaurants,
+      clusterPolylines,
+      clusterRadiusKm: radiusKm,
+    })
   } catch (err) {
     next(err)
   }

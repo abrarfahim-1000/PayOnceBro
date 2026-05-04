@@ -4,6 +4,10 @@ import supabase from '../lib/supabase'
 export async function login({ email, password }) {
   const { data } = await api.post('/auth/login', { email, password })
 
+  if (data.token) {
+    localStorage.setItem('token', data.token)
+  }
+
   // Hand the session back to the Supabase client so onAuthStateChange fires
   // and real-time subscriptions have a valid token
   if (data.session) {
@@ -24,6 +28,10 @@ export async function signup({ email, password, role, username, full_name }) {
     username,
     full_name,
   })
+
+  if (data.token) {
+    localStorage.setItem('token', data.token)
+  }
 
   if (data.session) {
     await supabase.auth.setSession({
@@ -49,11 +57,22 @@ export async function getCurrentUser() {
   }
 }
 
+/** Persists delivery coords from the location picker (customer profiles only). */
+export async function updateSavedDeliveryLocation({ lat, lng }) {
+  const { data } = await api.patch('/auth/me/delivery-location', { lat, lng })
+  return data
+}
+
 export async function logout() {
   try {
     await api.post('/auth/logout')
   } catch {
     // Even if server-side logout fails, clear the local session
+  }
+  try {
+    localStorage.removeItem('token')
+  } catch {
+    // Ignore storage errors
   }
   try {
     await supabase.auth.signOut()

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { search, getCategories } from '../controllers/searchController.js'
+import { search, getCategories, getSearchMap } from '../controllers/searchController.js'
 import { protect } from '../middleware/authMiddleware.js'
 
 const router = Router()
@@ -9,5 +9,8 @@ router.get('/', protect, search)
 
 // GET /api/search/categories  — for the cuisine filter dropdown
 router.get('/categories', protect, getCategories)
+
+// GET /api/search/map — restaurant pins + cluster lines for location picker
+router.get('/map', protect, getSearchMap)
 
 export default router

@@ -13,7 +13,7 @@
 //   • userLocation: { lat, lng }  required; used to find nearby clusters
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../../services/api'
 import { getPublicRestaurant } from '../../services/publicRestaurantService'
@@ -185,62 +185,80 @@ const NearbyRestaurantsView = ({ userLocation }) => {
   const lng = userLocation?.lng
 
   // Fetch clusters AND the search results (used to find non-clustered nearby
-  // restaurants). Both calls happen in parallel.
-  const load = useCallback(async () => {
+  // restaurants). Both calls happen in parallel. Abort on unmount / lat-lng
+  // change so Strict Mode or quick tab switches don't apply stale responses twice.
+  useEffect(() => {
     if (lat == null || lng == null) return
-    setLoading(true)
-    setError(null)
-    try {
-      // Call 1: clusters near the user
-      const clustersPromise = api
-        .get('/cluster/nearby', { params: { userLat: lat, userLng: lng } })
-        .then((r) => r.data)
 
-      // Call 2: nearby items (so we can extract all restaurants within range,
-      // not just the clustered ones).
-      const searchPromise = api
-        .get('/search', { params: { userLat: lat, userLng: lng } })
-        .then((r) => r.data)
+    const ac = new AbortController()
+    let cancelled = false
 
-      const [clustersData, searchData] = await Promise.all([clustersPromise, searchPromise])
-
-      setClusters(Array.isArray(clustersData.clusters) ? clustersData.clusters : [])
-
-      // Collect all unique restaurants visible in search results
-      const clusteredIds = new Set()
-      ;(clustersData.clusters ?? []).forEach((c) =>
-        (c.restaurants ?? []).forEach((r) => clusteredIds.add(r.id))
-      )
-
-      const seen = new Map() // restaurant.id -> restaurant object
-      ;(searchData.results ?? []).forEach((row) => {
-        const r = row.restaurant
-        if (!r?.id || clusteredIds.has(r.id)) return
-        if (!seen.has(r.id)) {
-          seen.set(r.id, {
-            ...r,
-            distanceKm: row.distanceKm ?? haversine(lat, lng, r.lat, r.lng),
+    const run = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const clustersPromise = api
+          .get('/cluster/nearby', {
+            params: { userLat: lat, userLng: lng },
+            signal: ac.signal,
           })
-        }
-      })
+          .then((r) => r.data)
 
-      // Show up to 10 nearest standalone restaurants
-      const standalone = [...seen.values()]
-        .filter((r) => r.lat != null && r.lng != null)
-        .sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0))
-        .slice(0, 10)
+        const searchPromise = api
+          .get('/search', {
+            params: { userLat: lat, userLng: lng },
+            signal: ac.signal,
+          })
+          .then((r) => r.data)
 
-      setNearbyStandalone(standalone)
-    } catch (err) {
-      setError(err?.response?.data?.message || err?.message || 'Failed to load restaurants')
-    } finally {
-      setLoading(false)
+        const [clustersData, searchData] = await Promise.all([clustersPromise, searchPromise])
+
+        if (cancelled) return
+
+        setClusters(Array.isArray(clustersData.clusters) ? clustersData.clusters : [])
+
+        const clusteredIds = new Set()
+        ;(clustersData.clusters ?? []).forEach((c) =>
+          (c.restaurants ?? []).forEach((r) => clusteredIds.add(r.id))
+        )
+
+        const seen = new Map()
+        ;(searchData.results ?? []).forEach((row) => {
+          const r = row.restaurant
+          if (!r?.id || clusteredIds.has(r.id)) return
+          if (!seen.has(r.id)) {
+            seen.set(r.id, {
+              ...r,
+              distanceKm: row.distanceKm ?? haversine(lat, lng, r.lat, r.lng),
+            })
+          }
+        })
+
+        const standalone = [...seen.values()]
+          .filter((r) => r.lat != null && r.lng != null)
+          .sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0))
+          .slice(0, 10)
+
+        setNearbyStandalone(standalone)
+      } catch (err) {
+        const aborted =
+          cancelled ||
+          err?.code === 'ERR_CANCELED' ||
+          err?.name === 'CanceledError' ||
+          (typeof err?.message === 'string' && err.message.toLowerCase().includes('cancel'))
+        if (aborted) return
+        setError(err?.response?.data?.message || err?.message || 'Failed to load restaurants')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+      ac.abort()
     }
   }, [lat, lng])
-
-  useEffect(() => {
-    load()
-  }, [load])
 
   // Decorated clusters with distanceKm per restaurant for display
   const decoratedClusters = useMemo(

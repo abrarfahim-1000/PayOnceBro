@@ -2,7 +2,7 @@
 // URL → Controller mapping for rider endpoints
 
 import { Router } from 'express'
-import { updateLocation, getLocation, getProfile, getAssignments, getEarnings, getRoute, setLocationForTesting } from '../controllers/riderController.js'
+import { updateLocation, getLocation, getProfile, getAssignments, getEarnings, getRoute, getOrderRoute, setLocationForTesting } from '../controllers/riderController.js'
 import { protect } from '../middleware/authMiddleware.js'
 import { restrictTo } from '../middleware/roleMiddleware.js'
 
@@ -20,6 +20,7 @@ router.get('/profile/me', restrictTo('rider'), getProfile)
 router.get('/assignments', restrictTo('rider'), getAssignments)
 router.get('/earnings', restrictTo('rider'), getEarnings)
 router.get('/route/:clusterId', restrictTo('rider'), getRoute)
+router.get('/route/order/:orderId', restrictTo('rider'), getOrderRoute)
 
 /**
  * PUT /api/rider/location

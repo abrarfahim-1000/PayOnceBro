@@ -3,6 +3,30 @@ import { normalizeRole } from '../utils/normalizeRole.js'
 
 const ALLOWED_ROLES = new Set(['user', 'rider', 'restaurant_owner'])
 
+/** Ensures a public.profiles row exists for this user (fixes pre-trigger / legacy auth-only accounts). */
+async function ensureProfileRowForUser({ id, email, role, username = null, full_name = null }) {
+  const { data: existing } = await supabase.from('profiles').select('id').eq('id', id).maybeSingle()
+  if (existing) return
+
+  const normalizedRole = normalizeRole(role ?? 'user')
+  const resolvedName =
+    (full_name && String(full_name).trim()) ||
+    (email && String(email).trim()) ||
+    'User'
+
+  const { error } = await supabase.from('profiles').insert({
+    id,
+    role: normalizedRole,
+    email: email ?? null,
+    username: username && String(username).trim() ? String(username).trim() : null,
+    full_name: resolvedName,
+  })
+
+  if (error && error.code !== '23505') {
+    throw error
+  }
+}
+
 export const register = async (req, res, next) => {
   try {
     const { email, password, role, username, full_name, name } = req.body
@@ -116,20 +140,39 @@ export const login = async (req, res, next) => {
       return res.status(401).json({ message: error.message })
     }
 
+    const user = data.user
+
     // Fetch the profile so we can include the definitive role in the response
-    const { data: profile } = await supabase
+    let { data: profile } = await supabase
       .from('profiles')
-      .select('role, username, full_name')
-      .eq('id', data.user.id)
-      .single()
+      .select('role, username, full_name, delivery_lat, delivery_lng')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (!profile) {
+      await ensureProfileRowForUser({
+        id: user.id,
+        email: user.email ?? null,
+        role: user.user_metadata?.role ?? 'user',
+        username: user.user_metadata?.username ?? null,
+        full_name: user.user_metadata?.full_name ?? null,
+      })
+      ;({ data: profile } = await supabase
+        .from('profiles')
+        .select('role, username, full_name, delivery_lat, delivery_lng')
+        .eq('id', user.id)
+        .maybeSingle())
+    }
 
     res.json({
       session: data.session,
       user: {
-        ...data.user,
-        role: normalizeRole(profile?.role ?? data.user.user_metadata?.role ?? 'user'),
+        ...user,
+        role: normalizeRole(profile?.role ?? user.user_metadata?.role ?? 'user'),
         username: profile?.username ?? null,
         full_name: profile?.full_name ?? null,
+        delivery_lat: profile?.delivery_lat ?? null,
+        delivery_lng: profile?.delivery_lng ?? null,
       },
       token: data.session?.access_token ?? null,
     })
@@ -152,15 +195,27 @@ export const logout = async (req, res, next) => {
 
 export const getMe = async (req, res, next) => {
   try {
-    // req.user is set by authMiddleware — id, email, role from the verified Supabase JWT
-    const { data: profile, error } = await supabase
+    let { data: profile, error } = await supabase
       .from('profiles')
-      .select('id, role, username, full_name, created_at')
+      .select('id, role, username, full_name, created_at, delivery_lat, delivery_lng')
       .eq('id', req.user.id)
-      .single()
+      .maybeSingle()
 
-    // PGRST116 = no rows found — profile row missing, not a server error
-    if (error && error.code !== 'PGRST116') throw error
+    if (error) throw error
+
+    if (!profile) {
+      await ensureProfileRowForUser({
+        id: req.user.id,
+        email: req.user.email ?? null,
+        role: req.user.role ?? 'user',
+      })
+      ;({ data: profile, error } = await supabase
+        .from('profiles')
+        .select('id, role, username, full_name, created_at, delivery_lat, delivery_lng')
+        .eq('id', req.user.id)
+        .maybeSingle())
+      if (error) throw error
+    }
 
     res.json({
       user: {
@@ -170,7 +225,58 @@ export const getMe = async (req, res, next) => {
         username: profile?.username ?? null,
         full_name: profile?.full_name ?? null,
         created_at: profile?.created_at ?? null,
+        delivery_lat: profile?.delivery_lat ?? null,
+        delivery_lng: profile?.delivery_lng ?? null,
       },
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const updateDeliveryLocation = async (req, res, next) => {
+  try {
+    const { lat, lng } = req.body ?? {}
+    const latNum = Number(lat)
+    const lngNum = Number(lng)
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+      return res.status(400).json({ message: 'Valid lat and lng are required' })
+    }
+    if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+      return res.status(400).json({ message: 'Coordinates are out of range' })
+    }
+
+    let { data, error } = await supabase
+      .from('profiles')
+      .update({ delivery_lat: latNum, delivery_lng: lngNum })
+      .eq('id', req.user.id)
+      .select('delivery_lat, delivery_lng')
+      .maybeSingle()
+
+    if (error) throw error
+
+    if (!data) {
+      await ensureProfileRowForUser({
+        id: req.user.id,
+        email: req.user.email ?? null,
+        role: req.user.role ?? 'user',
+      })
+      ;({ data, error } = await supabase
+        .from('profiles')
+        .update({ delivery_lat: latNum, delivery_lng: lngNum })
+        .eq('id', req.user.id)
+        .select('delivery_lat, delivery_lng')
+        .maybeSingle())
+      if (error) throw error
+    }
+
+    if (!data) {
+      return res.status(500).json({ message: 'Could not save delivery location' })
+    }
+
+    res.json({
+      delivery_lat: data.delivery_lat ?? null,
+      delivery_lng: data.delivery_lng ?? null,
     })
   } catch (err) {
     next(err)

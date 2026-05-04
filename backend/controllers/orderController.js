@@ -6,6 +6,7 @@ import * as clusterModel from '../models/clusterModel.js'
 import * as deliveryFeeService from '../services/deliveryFeeService.js'
 import { estimateDeliveryTime } from '../services/clusteringService.js'
 import { findBestRider } from '../services/riderAssignmentService.js'
+import supabase from '../config/db.js'
 import { startSimulatedOrderFlow } from '../services/orderSimulationService.js'
 
 const RESTAURANT_ALLOWED = {
@@ -154,7 +155,50 @@ export const getById = async (req, res, next) => {
 export const getByUser = async (req, res, next) => {
   try {
     const orders = await orderModel.getByUser(req.user.id)
-    res.json(orders)
+    const riderIds = [...new Set(orders.map((o) => o.rider_id).filter(Boolean))]
+    let riderMap = {}
+
+    if (riderIds.length > 0) {
+      const { data: riders, error: riderErr } = await supabase
+        .from('riders')
+        .select('id, user_id, avg_rating')
+        .in('id', riderIds)
+
+      if (riderErr) throw riderErr
+
+      const userIds = [...new Set((riders ?? []).map((r) => r.user_id).filter(Boolean))]
+      let profileMap = {}
+
+      if (userIds.length > 0) {
+        const { data: profiles, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, username')
+          .in('id', userIds)
+
+        if (profileErr) throw profileErr
+        profileMap = (profiles ?? []).reduce((acc, p) => {
+          acc[p.id] = p
+          return acc
+        }, {})
+      }
+
+      riderMap = (riders ?? []).reduce((acc, r) => {
+        const profile = profileMap[r.user_id] || {}
+        acc[r.id] = {
+          id: r.id,
+          fullName: profile.full_name || profile.username || 'Rider',
+          avgRating: r.avg_rating ?? 0,
+        }
+        return acc
+      }, {})
+    }
+
+    const enriched = orders.map((order) => ({
+      ...order,
+      rider: order.rider_id ? riderMap[order.rider_id] ?? null : null,
+    }))
+
+    res.json(enriched)
   } catch (err) {
     next(err)
   }

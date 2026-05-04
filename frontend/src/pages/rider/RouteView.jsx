@@ -8,11 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 const RouteView = () => {
   const [searchParams] = useSearchParams();
   const clusterId = searchParams.get('clusterId');
+  const orderId = searchParams.get('orderId');
   
   const [route, setRoute] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeClusterId, setActiveClusterId] = useState(clusterId);
+  const [activeOrderId, setActiveOrderId] = useState(orderId);
 
   // If no clusterId in query, fetch rider's current active assignment
   useEffect(() => {
@@ -20,6 +22,10 @@ const RouteView = () => {
       if (clusterId) {
         // Use the provided clusterId
         setActiveClusterId(clusterId);
+        return;
+      }
+      if (orderId) {
+        setActiveOrderId(orderId);
         return;
       }
 
@@ -36,17 +42,25 @@ const RouteView = () => {
         }
 
         // Find first active assignment with a cluster
-        const active = assignments.find(a => {
+        const activeCluster = assignments.find(a => {
           console.log(`Checking assignment: id=${a.id}, cluster_id=${a.cluster_id}, status=${a.status}`);
           return a.cluster_id && ['accepted', 'preparing', 'pickup', 'on_the_way'].includes(a.status);
         });
+
+        // Fallback: any active assignment (non-cluster)
+        const activeOrder = assignments.find(a =>
+          ['accepted', 'preparing', 'pickup', 'on_the_way'].includes(a.status)
+        );
         
-        console.log('📍 Active assignment found:', active);
-        
-        if (active && active.cluster_id) {
-          setActiveClusterId(active.cluster_id);
+        console.log('📍 Active cluster assignment found:', activeCluster);
+        console.log('📍 Active order assignment found:', activeOrder);
+
+        if (activeCluster && activeCluster.cluster_id) {
+          setActiveClusterId(activeCluster.cluster_id);
+        } else if (activeOrder && activeOrder.id) {
+          setActiveOrderId(activeOrder.id);
         } else {
-          setError('No active cluster assignment found. Start an order first.');
+          setError('No active assignment found. Start an order first.');
         }
       } catch (err) {
         setError('Failed to fetch assignments');
@@ -55,19 +69,21 @@ const RouteView = () => {
     };
 
     fetchActiveAssignment();
-  }, [clusterId]);
+  }, [clusterId, orderId]);
 
   // Fetch route optimization data
   useEffect(() => {
     const fetchRoute = async () => {
-      if (!activeClusterId) {
+      if (!activeClusterId && !activeOrderId) {
         return;
       }
 
       try {
         setLoading(true);
         setError(null);
-        const response = await api.get(`/rider/route/${activeClusterId}`);
+        const response = activeClusterId
+          ? await api.get(`/rider/route/${activeClusterId}`)
+          : await api.get(`/rider/route/order/${activeOrderId}`);
         setRoute(response.data);
       } catch (err) {
         setError(err.response?.data?.message || 'Failed to load route');
@@ -78,9 +94,9 @@ const RouteView = () => {
     };
 
     fetchRoute();
-  }, [activeClusterId]);
+  }, [activeClusterId, activeOrderId]);
 
-  if (!activeClusterId && !error) {
+  if (!activeClusterId && !activeOrderId && !error) {
     return (
       <div className="p-8">
         <Card className="border-blue-200 bg-blue-50">

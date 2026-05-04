@@ -16,6 +16,8 @@ export const searchFood = async (query = '', filters = {}) => {
   if (filters.cuisine) params.set('cuisine', filters.cuisine)
   if (filters.userLat !== undefined && filters.userLat !== null && filters.userLat !== '') params.set('userLat', filters.userLat)
   if (filters.userLng !== undefined && filters.userLng !== null && filters.userLng !== '') params.set('userLng', filters.userLng)
+  if (filters.limit != null && filters.limit !== '') params.set('limit', String(filters.limit))
+  if (filters.offset != null && filters.offset !== '') params.set('offset', String(filters.offset))
 
   const { data } = await api.get(`/search?${params.toString()}`)
   return data
@@ -27,4 +29,12 @@ export const searchFood = async (query = '', filters = {}) => {
 export const getCategories = async () => {
   const { data } = await api.get('/search/categories')
   return data.categories ?? []
+}
+
+/**
+ * Map context for LocationPickerMap: DB restaurants + cluster polylines.
+ */
+export const getSearchMap = async () => {
+  const { data } = await api.get('/search/map')
+  return data
 }

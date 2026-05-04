@@ -255,7 +255,7 @@ The live implementation uses a few additional tables/columns beyond the baseline
 
 ```sql
 -- Used by auth/session profile hydration
-profiles (id UUID PK, role TEXT, username TEXT, full_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW())
+profiles (id UUID PK = auth user id, role TEXT default user, username, full_name, email, delivery_lat and delivery_lng nullable, created_at TIMESTAMPTZ DEFAULT NOW())
 
 -- Used by order placement/tracking and rider route computation
 orders.user_lat FLOAT
@@ -1227,7 +1227,7 @@ frontend/src/hooks/useRiderNotifications.js   ← Supabase realtime on notificat
 
 ---
 
-## S4 — Feature 15: Gemini-Powered "Vibe Check" Review Summaries (Member C)
+## S4 — Feature 15: Gemini-Powered "Vibe Check" Review Summaries (Member C) ✅ DONE
 
 ### Goal
 A single-sentence Gemini-generated sentiment summary shown on each restaurant's public profile, giving users quick, actionable intelligence.

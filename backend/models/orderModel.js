@@ -172,3 +172,55 @@ export const insertStatusHistory = async (orderId, status, changedBy) => {
 
   if (error) throw error
 }
+
+export const getDeliveredOrderIdsByUser = async (userId, sinceIso, limit = 200) => {
+  if (!userId) return []
+
+  let query = supabase
+    .from('orders')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('status', 'delivered')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (sinceIso) {
+    query = query.gte('created_at', sinceIso)
+  }
+
+  const { data, error } = await query
+  if (error) throw error
+
+  return (data ?? []).map((r) => r.id).filter(Boolean)
+}
+
+export const getDeliveredOrderItemsSince = async (sinceIso, limit = 5000) => {
+  let query = supabase
+    .from('order_items')
+    .select('order_id, menu_item_id, restaurant_id, quantity, price_at_order, orders!inner(status, created_at)')
+    .eq('orders.status', 'delivered')
+    .order('order_id', { ascending: false })
+    .limit(limit)
+
+  if (sinceIso) {
+    query = query.gte('orders.created_at', sinceIso)
+  }
+
+  const { data, error } = await query
+  if (error) throw error
+
+  return data ?? []
+}
+
+export const getOrderItemsForOrders = async (orderIds = [], limit = 5000) => {
+  if (!Array.isArray(orderIds) || orderIds.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('order_items')
+    .select('order_id, menu_item_id, restaurant_id, quantity, price_at_order')
+    .in('order_id', orderIds)
+    .limit(limit)
+
+  if (error) throw error
+  return data ?? []
+}
