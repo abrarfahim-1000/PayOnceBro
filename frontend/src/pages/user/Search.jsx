@@ -17,6 +17,7 @@ import RecommendationCarousel from '../../components/admin/RecommendationCarouse
 import { Button } from '../../components/ui/button'
 import {
   searchFood,
+  searchRestaurants,
   getCategories as fetchApiCategories,
 } from '../../services/searchService'
 import { buildCombo, getRecommendations } from '../../services/aiService'
@@ -28,6 +29,7 @@ import { toast } from 'sonner'
 
 const LocationPickerMap = lazy(() => import('../../components/user/LocationPickerMap'))
 const NearbyRestaurantsView = lazy(() => import('../../components/user/NearbyRestaurantsView'))
+const RestaurantCard = lazy(() => import('../../components/user/RestaurantCard'))
 
 const ListFadeSkeleton = () => (
   <div className="space-y-3 py-2" aria-hidden>
@@ -141,11 +143,17 @@ const Search = () => {
 
   // Free recommendation payloads when browsing the Nearby tab (same parent state,
   // but search UI is unmounted — drops retained menu-shaped objects from memory).
+  // Free recommendation payloads when browsing the Nearby or Restaurants tab
   useEffect(() => {
     if (activeTab !== 'search') {
       setRecommendations(null)
       setRecoError(null)
     }
+    // Also clear results when switching tabs so we don't show wrong data briefly
+    setResults([])
+    setFoodHasMore(false)
+    setListDbOffset(0)
+    setLastQuery('')
   }, [activeTab])
 
   // Fetch recommendations once location is known (and when it changes).
@@ -198,7 +206,14 @@ const Search = () => {
         limit: pageLimit,
         offset: 0,
       }
-      const data = await searchFood(trimmed, merged)
+      
+      let data
+      if (activeTab === 'restaurants') {
+        data = await searchRestaurants(trimmed, merged)
+      } else {
+        data = await searchFood(trimmed, merged)
+      }
+      
       const r = data?.results
       setResults(Array.isArray(r) ? r : [])
       setFoodHasMore(Boolean(data?.hasMore))
@@ -211,7 +226,7 @@ const Search = () => {
     } finally {
       setSearchLoading(false)
     }
-  }, [mapLocation.lat, mapLocation.lng])
+  }, [mapLocation.lat, mapLocation.lng, activeTab])
 
   const handleLoadMoreFood = useCallback(async () => {
     if (!foodHasMore || loadingMore || searchLoading) return
@@ -224,7 +239,14 @@ const Search = () => {
         limit: HOME_LOAD_MORE_STEP,
         offset: listDbOffset,
       }
-      const data = await searchFood(lastQuery.trim(), merged)
+      
+      let data
+      if (activeTab === 'restaurants') {
+        data = await searchRestaurants(lastQuery.trim(), merged)
+      } else {
+        data = await searchFood(lastQuery.trim(), merged)
+      }
+
       const r = data?.results
       const chunk = Array.isArray(r) ? r : []
       setResults((prev) => [...prev, ...chunk])
@@ -248,6 +270,7 @@ const Search = () => {
     mapLocation.lng,
     listDbOffset,
     lastQuery,
+    activeTab,
   ])
 
   // Group search results by restaurant for display
@@ -366,9 +389,10 @@ const Search = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-gray-200 mb-5">
+        <div className="flex gap-1 border-b border-gray-200 mb-5 overflow-x-auto whitespace-nowrap">
           {[
             { key: 'search', label: '🔍 All food' },
+            { key: 'restaurants', label: '🏪 Restaurants' },
             { key: 'nearby', label: '🔗 Nearby & Clustering' },
           ].map((t) => (
             <button
@@ -385,155 +409,164 @@ const Search = () => {
           ))}
         </div>
 
-        {/* ───────── TAB 1: All food (search) ───────────────────────────── */}
-        {activeTab === 'search' && (
+        {/* ───────── TAB 1 & 2: Search (Food / Restaurants) ───────────────────────────── */}
+        {(activeTab === 'search' || activeTab === 'restaurants') && (
           <>
             <div className="mb-5">
               <SearchBar
+                key={activeTab} // Force remount on tab change to clear/trigger new debounce
                 onSearch={handleSearch}
                 categories={categories}
                 loading={searchLoading}
+                hidePriceFilter={activeTab === 'restaurants'}
               />
             </div>
 
             {/* Recommendations (must appear between search bar and general food list) */}
-            <div className="space-y-4 mb-6">
-              <RecommendationCarousel
-                title="✨ Recommended for you"
-                subtitle={recoLoading ? 'Loading personalized picks…' : 'Popular picks near you'
-                }
-                items={recommendations?.popular ?? []}
-                onAddToCart={handleAddToCart}
-              />
-
-              {(recommendations?.frequentlyTogether ?? []).length > 0 && (
+            {activeTab === 'search' && (
+              <div className="space-y-4 mb-6">
                 <RecommendationCarousel
-                  title="🧠 Frequently ordered together"
-                  subtitle="Based on your recent orders"
-                  items={recommendations?.frequentlyTogether ?? []}
+                  title="✨ Recommended for you"
+                  subtitle={recoLoading ? 'Loading personalized picks…' : 'Popular picks near you'}
+                  items={recommendations?.popular ?? []}
                   onAddToCart={handleAddToCart}
                 />
-              )}
 
-              {(recommendations?.clusterFriendly ?? []).length > 0 && (
-                <RecommendationCarousel
-                  title="🔗 Cluster-friendly picks"
-                  subtitle="Great options to save on delivery"
-                  items={recommendations?.clusterFriendly ?? []}
-                  onAddToCart={handleAddToCart}
-                />
-              )}
+                {(recommendations?.frequentlyTogether ?? []).length > 0 && (
+                  <RecommendationCarousel
+                    title="🧠 Frequently ordered together"
+                    subtitle="Based on your recent orders"
+                    items={recommendations?.frequentlyTogether ?? []}
+                    onAddToCart={handleAddToCart}
+                  />
+                )}
 
-              {recoError && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                  {recoError}
-                </div>
-              )}
-            </div>
+                {(recommendations?.clusterFriendly ?? []).length > 0 && (
+                  <RecommendationCarousel
+                    title="🔗 Cluster-friendly picks"
+                    subtitle="Great options to save on delivery"
+                    items={recommendations?.clusterFriendly ?? []}
+                    onAddToCart={handleAddToCart}
+                  />
+                )}
+
+                {recoError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                    {recoError}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* AI combo builder — directly under recommendation carousels, above All food list */}
-            <div className="rounded-2xl border bg-card p-4 mb-6">
-              <form
-                className="contents"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  handleBuildCombo()
-                }}
-              >
-                <div>
-                  <h3 className="text-base font-black text-card-foreground">🤝 Build me a combo</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Tell us your mood, diet, or budget (e.g. &quot;spicy halal under 350&quot;).
-                  </p>
-                </div>
-
-                <div className="mt-3 flex flex-col sm:flex-row gap-2">
-                  <textarea
-                    value={comboPrompt}
-                    onChange={(e) => setComboPrompt(e.target.value)}
-                    rows={2}
-                    className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/50"
-                    placeholder="What should I order today?"
-                  />
-                  <Button type="submit" disabled={comboLoading} className="sm:w-40">
-                    {comboLoading ? 'Thinking…' : 'Build combo'}
-                  </Button>
-                </div>
-              </form>
-
-              {comboError && (
-                <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {comboError}
-                </div>
-              )}
-
-              {comboResult && (
-                <div className="mt-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-bold text-card-foreground">Suggested combo</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {comboResult.explanation}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-muted-foreground">Total</p>
-                      <p className="text-lg font-black">৳{Number(comboResult.totalPrice || 0).toFixed(0)}</p>
-                    </div>
+            {activeTab === 'search' && (
+              <div className="rounded-2xl border bg-card p-4 mb-6">
+                <form
+                  className="contents"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleBuildCombo()
+                  }}
+                >
+                  <div>
+                    <h3 className="text-base font-black text-card-foreground">🤝 Build me a combo</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Tell us your mood, diet, or budget (e.g. &quot;spicy halal under 350&quot;).
+                    </p>
                   </div>
 
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {(comboResult.suggestedItems ?? []).map((row) => (
-                      <div key={row.menuItem.id} className="relative">
-                        <FoodCard
-                          item={{
-                            menuItem: row.menuItem,
-                            restaurant: row.restaurant,
-                            distanceKm: null,
-                            isClusterEligible: false,
-                          }}
-                          onAddToCart={() =>
-                            handleAddToCart({
+                  <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                    <textarea
+                      value={comboPrompt}
+                      onChange={(e) => setComboPrompt(e.target.value)}
+                      rows={2}
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring/50"
+                      placeholder="What should I order today?"
+                    />
+                    <Button type="submit" disabled={comboLoading} className="sm:w-40">
+                      {comboLoading ? 'Thinking…' : 'Build combo'}
+                    </Button>
+                  </div>
+                </form>
+
+                {comboError && (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {comboError}
+                  </div>
+                )}
+
+                {comboResult && (
+                  <div className="mt-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-card-foreground">Suggested combo</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {comboResult.explanation}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Total</p>
+                        <p className="text-lg font-black">৳{Number(comboResult.totalPrice || 0).toFixed(0)}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {(comboResult.suggestedItems ?? []).map((row) => (
+                        <div key={row.menuItem.id} className="relative">
+                          <FoodCard
+                            item={{
                               menuItem: row.menuItem,
                               restaurant: row.restaurant,
                               distanceKm: null,
                               isClusterEligible: false,
-                            })
-                          }
-                        />
-                        {Number(row.quantity || 1) > 1 && (
-                          <div className="absolute top-3 right-3 rounded-full bg-secondary text-secondary-foreground text-xs font-bold px-2 py-1">
-                            x{Math.min(5, Number(row.quantity || 1))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                            }}
+                            onAddToCart={() =>
+                              handleAddToCart({
+                                menuItem: row.menuItem,
+                                restaurant: row.restaurant,
+                                distanceKm: null,
+                                isClusterEligible: false,
+                              })
+                            }
+                          />
+                          {Number(row.quantity || 1) > 1 && (
+                            <div className="absolute top-3 right-3 rounded-full bg-secondary text-secondary-foreground text-xs font-bold px-2 py-1">
+                              x{Math.min(5, Number(row.quantity || 1))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
 
-                  <div className="mt-4 flex items-center justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => setComboResult(null)}>
-                      Clear
-                    </Button>
-                    <Button type="button" onClick={handleAddComboToCart}>
-                      Add all to cart
-                    </Button>
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setComboResult(null)}>
+                        Clear
+                      </Button>
+                      <Button type="button" onClick={handleAddComboToCart}>
+                        Add all to cart
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">
                   {searchLoading
-                    ? '🍔 What are you craving?'
+                    ? (activeTab === 'restaurants' ? '🏪 Finding restaurants...' : '🍔 What are you craving?')
                     : lastQuery
                       ? `Results for "${lastQuery}"`
-                      : 'All food'}
+                      : (activeTab === 'restaurants' ? 'All restaurants' : 'All food')}
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {results.length} item{results.length !== 1 ? 's' : ''} across{' '}
-                  {groups.length} restaurant{groups.length !== 1 ? 's' : ''}
+                  {results.length} {activeTab === 'restaurants' ? 'restaurant' : 'item'}{results.length !== 1 ? 's' : ''}
+                  {activeTab === 'search' ? (
+                    <>
+                      {' '}across {groups.length} restaurant{groups.length !== 1 ? 's' : ''}
+                    </>
+                  ) : null}
                   {foodHasMore ? ' · more available' : ''}
                 </p>
               </div>
@@ -555,56 +588,73 @@ const Search = () => {
               </div>
             )}
 
-            <div className="space-y-8">
-              {groups.map(({ restaurant, items, hasCluster }) => (
-                <section key={restaurant.id}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-xl bg-linear-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white font-black text-lg shadow-sm">
-                      {restaurant.name?.[0] || '?'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <Link
-                        to={`/restaurants/${restaurant.id}`}
-                        className="font-bold text-gray-900 hover:text-orange-600 transition"
-                      >
-                        {restaurant.name}
-                      </Link>
-                      <p className="text-xs text-gray-400 truncate">
-                        {restaurant.address}
-                      </p>
-                    </div>
-                    <span className="text-sm font-semibold text-amber-500 shrink-0">
-                      ⭐ {Number(restaurant.avgRating || 0).toFixed(1)}
-                    </span>
-                  </div>
-
-                  {hasCluster && (
-                    <div className="mb-3 rounded-xl bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200 px-4 py-2.5 flex items-center gap-2">
-                      <span className="text-xl">🔗</span>
-                      <div>
-                        <p className="text-sm font-bold text-emerald-700">
-                          Cluster Delivery Available!
-                        </p>
-                        <p className="text-xs text-emerald-600">
-                          Near other restaurants — order from multiple and save on
-                          delivery fees.
+            {activeTab === 'search' && (
+              <div className="space-y-8">
+                {groups.map(({ restaurant, items, hasCluster }) => (
+                  <section key={restaurant.id}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-linear-to-br from-orange-400 to-rose-500 flex items-center justify-center text-white font-black text-lg shadow-sm">
+                        {restaurant.name?.[0] || '?'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <Link
+                          to={`/restaurants/${restaurant.id}`}
+                          className="font-bold text-gray-900 hover:text-orange-600 transition"
+                        >
+                          {restaurant.name}
+                        </Link>
+                        <p className="text-xs text-gray-400 truncate">
+                          {restaurant.address}
                         </p>
                       </div>
+                      <span className="text-sm font-semibold text-amber-500 shrink-0">
+                        ⭐ {Number(restaurant.avgRating || 0).toFixed(1)}
+                      </span>
                     </div>
-                  )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {items.map((row) => (
-                      <FoodCard
-                        key={row.menuItem.id}
-                        item={row}
-                        onAddToCart={handleAddToCart}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
+                    {hasCluster && (
+                      <div className="mb-3 rounded-xl bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200 px-4 py-2.5 flex items-center gap-2">
+                        <span className="text-xl">🔗</span>
+                        <div>
+                          <p className="text-sm font-bold text-emerald-700">
+                            Cluster Delivery Available!
+                          </p>
+                          <p className="text-xs text-emerald-600">
+                            Near other restaurants — order from multiple and save on
+                            delivery fees.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {items.map((row) => (
+                        <FoodCard
+                          key={row.menuItem.id}
+                          item={row}
+                          onAddToCart={handleAddToCart}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+
+            {activeTab === 'restaurants' && (
+              <div className="space-y-4">
+                <Suspense fallback={<ListFadeSkeleton />}>
+                  {results.map((row) => (
+                    <RestaurantCard
+                      key={row.restaurant.id}
+                      restaurant={row.restaurant}
+                      clusterColor={null}
+                      distanceKm={row.distanceKm}
+                    />
+                  ))}
+                </Suspense>
+              </div>
+            )}
 
             {foodHasMore && !searchError && results.length > 0 && (
               <div className="flex justify-center mt-8">
@@ -615,7 +665,7 @@ const Search = () => {
                   disabled={loadingMore}
                   onClick={() => handleLoadMoreFood()}
                 >
-                  {loadingMore ? 'Loading…' : 'Load more food'}
+                  {loadingMore ? 'Loading…' : (activeTab === 'restaurants' ? 'Load more restaurants' : 'Load more food')}
                 </Button>
               </div>
             )}
