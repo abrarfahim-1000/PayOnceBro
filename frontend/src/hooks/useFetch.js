@@ -1,6 +1,9 @@
 import { useCallback, useState } from "react"
 import { toast } from 'sonner'
 
+const isSuppressedRoleError = (message = '') =>
+    message.trim().toLowerCase() === 'access denied: insufficient role'
+
 const useFetch = (cb) => {
     const [data, setData] = useState(null)
     const [error, setError] = useState(null)
@@ -20,7 +23,9 @@ const useFetch = (cb) => {
                 err?.message ||
                 'Something went wrong'
             setError({ ...err, message })
-            toast.error(message, { id: `error-${message}` })
+            if (!isSuppressedRoleError(message)) {
+                toast.error(message, { id: `error-${message}` })
+            }
         } finally {
             setLoading(false)
         }
