@@ -15,7 +15,6 @@ import * as Yup from 'yup'
 import useFetch from '../../hooks/useFetch'
 import { login } from '../../services/authService'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { UrlState } from '../../context/AuthContext'
 import { toast } from 'sonner'
 
 const Login = () => {
@@ -28,7 +27,6 @@ const Login = () => {
     const navigate = useNavigate()
     let [searchParams] = useSearchParams()
     const longlink = searchParams.get("createNew")
-    const { fetchuser } = UrlState()
 
     const { data, error, loading, fn: fnlogin } = useFetch(login, formdata)
 
@@ -37,13 +35,11 @@ const Login = () => {
             if (!(data && !error)) return
 
             toast.success('Signed in. Welcome back.')
-            // Refresh context user and delegate role-based redirect to /auth.
-            await fetchuser()
             navigate(`/auth${longlink ? `?createNew=${longlink}` : ''}`, { replace: true })
         }
 
         finalizeLogin()
-    }, [data, error, fetchuser, navigate, longlink])
+    }, [data, error, navigate, longlink])
 
     const handleInputChange = (e) => {
         const { name, value } = e.target

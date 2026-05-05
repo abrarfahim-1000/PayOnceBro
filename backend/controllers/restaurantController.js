@@ -1,11 +1,16 @@
 import * as restaurantModel from '../models/restaurantModel.js'
 import * as menuModel from '../models/menuModel.js'
 import * as ratingModel from '../models/ratingModel.js'
+import * as orderModel from '../models/orderModel.js'
+import * as subOrderModel from '../models/subOrderModel.js'
+import * as clusterModel from '../models/clusterModel.js'
+import * as deliveryFeeService from '../services/deliveryFeeService.js'
+import { estimateDeliveryTime } from '../services/clusteringService.js'
 import { findBestRider } from '../services/riderAssignmentService.js'
-import { generateMenuTags } from '../services/geminiService.js'
+import * as riderModel from '../models/riderModel.js'
 import supabase from '../config/db.js'
-import { generateVibeSummary } from '../services/geminiService.js'
-import { buildMenuTags } from '../services/menuTaggingService.js'
+import { generateMenuTags, generateVibeSummary } from '../services/geminiService.js'
+import { buildMenuTags, inferFallbackTags } from '../services/menuTaggingService.js'
 import { startSimulatedOrderFlow } from '../services/orderSimulationService.js'
 
 const VIBE_CACHE_TTL_MS = 60 * 60 * 1000
@@ -48,9 +53,115 @@ export const createRestaurant = async (req, res, next) => {
 
 // Restaurant role: which status transitions are allowed
 const ALLOWED_TRANSITIONS = {
-  pending:  ['accepted', 'cancelled'],
-  accepted: ['preparing', 'cancelled'],
-  preparing: ['cancelled'],
+  pending: ['accepted', 'rejected'],
+  accepted: ['preparing', 'rejected'],
+  preparing: ['pickup'],
+  pickup: [],
+  rejected: [],
+}
+
+const checkAllAcceptance = async (orderId) => {
+  const subOrders = await subOrderModel.getByOrder(orderId)
+  if (subOrders.length === 0) return null
+
+  const activeSubs = subOrders.filter((s) => s.status !== 'rejected')
+  if (activeSubs.length === 0) {
+    const updated = await orderModel.updateStatus(orderId, 'cancelled')
+    await orderModel.insertStatusHistory(orderId, 'cancelled', null).catch(() => {})
+    return updated
+  }
+
+  const allAccepted = activeSubs.every((s) => s.status === 'accepted')
+  if (!allAccepted) return null
+
+  const updated = await orderModel.updateStatus(orderId, 'accepted')
+  await orderModel.insertStatusHistory(orderId, 'accepted', null).catch(() => {})
+  try {
+    await findBestRider(orderId)
+  } catch (assignErr) {
+    console.error(`❌ Rider assignment failed for order ${orderId}:`, assignErr?.message || assignErr)
+  }
+  return updated
+}
+
+const checkAllPreparing = async (orderId) => {
+  const subOrders = await subOrderModel.getByOrder(orderId)
+  if (subOrders.length === 0) return null
+
+  const activeSubs = subOrders.filter((s) => s.status !== 'rejected')
+  if (activeSubs.length === 0) return null
+
+  const allPreparing = activeSubs.every((s) => ['preparing', 'pickup'].includes(s.status))
+  if (!allPreparing) return null
+
+  const updated = await orderModel.updateStatus(orderId, 'preparing')
+  await orderModel.insertStatusHistory(orderId, 'preparing', null).catch(() => {})
+  return updated
+}
+
+const checkAllPickup = async (orderId) => {
+  const subOrders = await subOrderModel.getByOrder(orderId)
+  if (subOrders.length === 0) return null
+
+  const activeSubs = subOrders.filter((s) => s.status !== 'rejected')
+  if (activeSubs.length === 0) return null
+
+  const allPickup = activeSubs.every((s) => s.status === 'pickup')
+  if (!allPickup) return null
+
+  const order = await orderModel.getById(orderId)
+  if (order && !order.rider_id) {
+    try {
+      await findBestRider(orderId)
+    } catch (assignErr) {
+      console.error(`❌ Rider assignment failed for order ${orderId}:`, assignErr?.message || assignErr)
+    }
+  }
+
+  const updated = await orderModel.updateStatus(orderId, 'pickup')
+  await orderModel.insertStatusHistory(orderId, 'pickup', null).catch(() => {})
+  return updated
+}
+
+const handleRestaurantRejection = async (orderId, restaurantId) => {
+  await orderModel.deleteItemsByRestaurant(orderId, restaurantId)
+  const remainingItems = await orderModel.getItemsByOrder(orderId)
+  const remainingRestaurantIds = [...new Set(remainingItems.map((i) => i.restaurant_id).filter(Boolean))]
+
+  if (remainingRestaurantIds.length === 0) {
+    await orderModel.updateTotals(orderId, { totalPrice: 0, deliveryFee: 0 })
+    const updated = await orderModel.updateStatus(orderId, 'cancelled')
+    await orderModel.insertStatusHistory(orderId, 'cancelled', null).catch(() => {})
+    return updated
+  }
+
+  const restaurants = await restaurantModel.getByIds(remainingRestaurantIds)
+  const order = await orderModel.getById(orderId)
+  const subtotal = remainingItems.reduce(
+    (sum, item) => sum + Number(item.price_at_order || 0) * Number(item.quantity || 0),
+    0
+  )
+  const feeResult = deliveryFeeService.calculate(
+    restaurants,
+    Number(order.user_lat ?? 0),
+    Number(order.user_lng ?? 0),
+    restaurants.length > 1
+  )
+  const eta = estimateDeliveryTime(restaurants, Number(order.user_lat ?? 0), Number(order.user_lng ?? 0))
+
+  await orderModel.updateTotals(orderId, {
+    totalPrice: Number(subtotal.toFixed(2)),
+    deliveryFee: feeResult.fee,
+    estimatedTime: eta.estimatedMinutes,
+  })
+
+  if (order.cluster_id) {
+    await clusterModel
+      .updateRestaurantIds(order.cluster_id, remainingRestaurantIds)
+      .catch(() => {})
+  }
+
+  return order
 }
 
 /**
@@ -69,12 +180,13 @@ export const getOrders = async (req, res, next) => {
       return res.status(404).json({ message: 'No restaurant found for this account' })
     }
 
-    const myItems = await restaurantModel.getOrderItemsByRestaurant(restaurant.id)
-    if (myItems.length === 0) {
+    const subOrders = await subOrderModel.getByRestaurant(restaurant.id)
+    if (subOrders.length === 0) {
       return res.json({ pending: [], preparing: [], pickup: [], completed: [] })
     }
 
-    const orderIds = [...new Set(myItems.map((i) => i.order_id))]
+    const orderIds = [...new Set(subOrders.map((s) => s.order_id))]
+    const myItems = await restaurantModel.getOrderItemsByRestaurant(restaurant.id)
 
     const [activeOrders, completedOrders] = await Promise.all([
       restaurantModel.getActiveOrdersByIds(orderIds),
@@ -105,6 +217,10 @@ export const getOrders = async (req, res, next) => {
       return acc
     }, {})
 
+    const subStatusByOrder = subOrders.reduce((acc, sub) => {
+      acc[sub.order_id] = sub.status === 'pickup' ? 'completed' : sub.status
+      return acc
+    }, {})
     const riderIds = [...new Set(allOrders.map((o) => o.rider_id).filter(Boolean))]
     let riderMap = {}
 
@@ -145,6 +261,7 @@ export const getOrders = async (req, res, next) => {
 
     const enriched = allOrders.map((order) => ({
       ...order,
+      restaurant_status: subStatusByOrder[order.id] || 'pending',
       myItems: itemsByOrder[order.id] ?? [],
       isClusteredOrder: !!order.cluster_id,
       cluster: order.cluster_id ? (clustersMap[order.cluster_id] ?? null) : null,
@@ -154,10 +271,9 @@ export const getOrders = async (req, res, next) => {
     }))
 
     res.json({
-      pending:   enriched.filter((o) => o.status === 'pending'),
-      preparing: enriched.filter((o) => ['accepted', 'preparing'].includes(o.status)),
-      pickup:    enriched.filter((o) => o.status === 'pickup'),
-      completed: enriched.filter((o) => o.status === 'delivered'),
+      pending: enriched.filter((o) => o.restaurant_status === 'pending'),
+      preparing: enriched.filter((o) => ['accepted', 'preparing'].includes(o.restaurant_status)),
+      completed: enriched.filter((o) => o.restaurant_status === 'completed' || o.status === 'delivered'),
     })
   } catch (err) {
     next(err)
@@ -186,26 +302,37 @@ export const updateOrderStatus = async (req, res, next) => {
     const order = await restaurantModel.getOrderById(orderId)
     if (!order) return res.status(404).json({ message: 'Order not found' })
 
-    const allowed = ALLOWED_TRANSITIONS[order.status]
+    const subOrder = await subOrderModel.getByOrderAndRestaurant(orderId, restaurant.id)
+    if (!subOrder) {
+      return res.status(404).json({ message: 'Sub-order not found for this restaurant' })
+    }
+    const allowed = ALLOWED_TRANSITIONS[subOrder.status]
     if (!allowed || !allowed.includes(status)) {
       return res.status(400).json({
-        message: `Cannot transition '${order.status}' → '${status}'. Allowed: ${(allowed ?? []).join(', ') || 'none'}`,
+        message: `Cannot transition '${subOrder.status}' → '${status}'. Allowed: ${(allowed ?? []).join(', ') || 'none'}`,
       })
     }
 
-    const updated = await restaurantModel.updateOrderStatus(orderId, status)
+    const updatedSub = await subOrderModel.updateStatus(subOrder.id, status)
 
-    // Keep assignment behavior consistent with /orders/:id/status flow.
     if (status === 'accepted') {
-      try {
-        await findBestRider(orderId)
-      } catch (assignErr) {
-        console.error(`❌ Rider assignment failed for order ${orderId}:`, assignErr?.message || assignErr)
-      }
-        startSimulatedOrderFlow(orderId, req.user.id)
+      await checkAllAcceptance(orderId)
     }
 
-    res.json({ order: updated })
+    if (status === 'preparing') {
+      await checkAllPreparing(orderId)
+    }
+
+    if (status === 'rejected') {
+      await handleRestaurantRejection(orderId, restaurant.id)
+      await checkAllAcceptance(orderId)
+    }
+
+    if (status === 'pickup') {
+      await checkAllPickup(orderId)
+    }
+
+    res.json({ order: order, subOrder: updatedSub })
   } catch (err) {
     next(err)
   }
@@ -261,14 +388,30 @@ export const addMenuItem = async (req, res, next) => {
     })
 
     let taggedItem = item
+    const fallbackTags = inferFallbackTags(item.name, item.description)
     try {
+      if (fallbackTags.length > 0) {
+        taggedItem = await menuModel.updateTags(item.id, fallbackTags)
+      }
       const tags = await buildMenuTags(item.name, item.description)
       taggedItem = await menuModel.updateTags(item.id, tags)
     } catch {
-      // Menu write should still succeed even if AI tagging fails.
+      // Menu write should still succeed even if tag update fails.
     }
 
     res.status(201).json({ item: taggedItem })
+
+    ;(async () => {
+      try {
+        const aiTags = await generateMenuTags(item.name, item.description)
+        if (Array.isArray(aiTags) && aiTags.length > 0) {
+          const merged = [...new Set([...aiTags, ...fallbackTags])]
+          await menuModel.updateTags(item.id, merged)
+        }
+      } catch {
+        // Background tagging should not impact the response.
+      }
+    })()
   } catch (err) {
     next(err)
   }
@@ -299,14 +442,27 @@ export const editMenuItem = async (req, res, next) => {
     }
 
     let taggedItem = item
+    const fallbackTags = inferFallbackTags(item.name, item.description)
     try {
       const tags = await buildMenuTags(item.name, item.description)
       taggedItem = await menuModel.updateTags(item.id, tags)
     } catch {
-      // Keep successful menu updates even if Gemini is unavailable.
+      // Keep successful menu updates even if tag update fails.
     }
 
     res.json({ item: taggedItem })
+
+    ;(async () => {
+      try {
+        const aiTags = await generateMenuTags(item.name, item.description)
+        if (Array.isArray(aiTags) && aiTags.length > 0) {
+          const merged = [...new Set([...aiTags, ...fallbackTags])]
+          await menuModel.updateTags(item.id, merged)
+        }
+      } catch {
+        // Background tagging should not impact the response.
+      }
+    })()
   } catch (err) {
     next(err)
   }

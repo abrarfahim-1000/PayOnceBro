@@ -44,7 +44,7 @@ export const createItems = async (orderId, items = []) => {
 export const getById = async (orderId) => {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, user_id, rider_id, cluster_id, status, delivered_at')
+    .select('id, user_id, rider_id, cluster_id, status, delivered_at, user_lat, user_lng')
     .eq('id', orderId)
     .single()
 
@@ -110,6 +110,43 @@ export const getWithItems = async (orderId) => {
   if (itemError) throw itemError
 
   return { order, items: items ?? [] }
+}
+
+export const deleteItemsByRestaurant = async (orderId, restaurantId) => {
+  const { error } = await supabase
+    .from('order_items')
+    .delete()
+    .eq('order_id', orderId)
+    .eq('restaurant_id', restaurantId)
+
+  if (error) throw error
+}
+
+export const getItemsByOrder = async (orderId) => {
+  const { data, error } = await supabase
+    .from('order_items')
+    .select('menu_item_id, restaurant_id, quantity, price_at_order')
+    .eq('order_id', orderId)
+
+  if (error) throw error
+  return data ?? []
+}
+
+export const updateTotals = async (orderId, { totalPrice, deliveryFee, estimatedTime } = {}) => {
+  const payload = {}
+  if (totalPrice != null) payload.total_price = totalPrice
+  if (deliveryFee != null) payload.delivery_fee = deliveryFee
+  if (estimatedTime != null) payload.estimated_time = estimatedTime
+
+  const { data, error } = await supabase
+    .from('orders')
+    .update(payload)
+    .eq('id', orderId)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const updateStatus = async (orderId, status) => {

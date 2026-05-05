@@ -10,6 +10,7 @@ const STATUS_BADGE = {
   accepted:  'bg-blue-100 text-blue-800 hover:bg-blue-200',
   preparing: 'bg-orange-100 text-orange-800 hover:bg-orange-200',
   pickup:    'bg-purple-100 text-purple-800 hover:bg-purple-200',
+  completed: 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
   delivered: 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200',
   cancelled: 'bg-red-100 text-red-800 hover:bg-red-200',
 }
@@ -17,7 +18,12 @@ const STATUS_BADGE = {
 const fmt = (n) => `৳${Number(n).toFixed(0)}`
 
 const OrderCard = ({ order, onStatusChange }) => {
-  const isAccepted = order.status === 'accepted'
+  const restaurantStatus = order.restaurant_status || order.status
+  const isAccepted = restaurantStatus === 'accepted'
+  const restaurantSubtotal = order.myItems.reduce(
+    (sum, item) => sum + Number(item.price_at_order || 0) * Number(item.quantity || 0),
+    0
+  )
 
   return (
     <Card className="shadow-sm overflow-hidden border-border transition-all hover:shadow-md">
@@ -40,13 +46,27 @@ const OrderCard = ({ order, onStatusChange }) => {
                 🔗 Cluster ×{order.cluster?.restaurantCount ?? '?'}
               </Badge>
             )}
-            <Badge variant="outline" className={`capitalize whitespace-nowrap ${STATUS_BADGE[order.status] ?? 'bg-muted text-muted-foreground'}`}>
-              {order.status}
+            <Badge variant="outline" className={`capitalize whitespace-nowrap ${STATUS_BADGE[restaurantStatus] ?? 'bg-muted text-muted-foreground'}`}>
+              {restaurantStatus}
             </Badge>
           </div>
         </div>
 
         <Separator className="my-1 opacity-50" />
+
+        <div className="text-xs text-gray-500">
+          {order.rider ? (
+            <>
+              Rider:{' '}
+              <span className="font-semibold text-gray-800">
+                {order.rider.fullName}
+              </span>
+              {order.rider.email ? ` · ${order.rider.email}` : ''}
+            </>
+          ) : (
+            <span>No rider assigned yet</span>
+          )}
+        </div>
 
         {/* Items list */}
         <ul className="space-y-1.5">
@@ -65,7 +85,7 @@ const OrderCard = ({ order, onStatusChange }) => {
         <Separator className="my-1 border-dashed" />
         <div className="flex items-center justify-between pt-1">
           <span className="text-sm font-bold text-foreground">
-            {fmt(order.total_price)}
+            {fmt(restaurantSubtotal)}
           </span>
 
           {/* Prep timer only shows once order is accepted */}
@@ -92,7 +112,7 @@ const OrderCard = ({ order, onStatusChange }) => {
 
         {/* Action buttons */}
         <div className="pt-2">
-          <OrderActionButtons order={order} onStatusChange={onStatusChange} />
+          <OrderActionButtons order={{ ...order, status: restaurantStatus }} onStatusChange={onStatusChange} />
         </div>
       </CardContent>
     </Card>

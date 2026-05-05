@@ -4,10 +4,10 @@ import { BeatLoader } from 'react-spinners';
 import { getRoleHome } from '../../utils/roleHome';
 
 const ProtectedRoute = ({ role }) => {
-  const { user, isAuthenticated, loading, isSessionLoaded } = UrlState();
+  const { user, isAuthenticated, loading, authSyncing, isSessionLoaded } = UrlState();
 
-  // Wait until the Supabase session has been checked AND the user fetch has settled
-  const stillLoading = loading || !isSessionLoaded;
+  // Only block the UI if the session isn't loaded yet, OR if we're fetching and don't have a user
+  const stillLoading = !isSessionLoaded || authSyncing || (loading && !user);
   if (stillLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', marginTop: '4rem' }}>

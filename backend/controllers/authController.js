@@ -5,24 +5,27 @@ const ALLOWED_ROLES = new Set(['user', 'rider', 'restaurant_owner'])
 
 /** Ensures a public.profiles row exists for this user (fixes pre-trigger / legacy auth-only accounts). */
 async function ensureProfileRowForUser({ id, email, role, username = null, full_name = null }) {
-  const { data: existing } = await supabase.from('profiles').select('id').eq('id', id).maybeSingle()
-  if (existing) return
-
   const normalizedRole = normalizeRole(role ?? 'user')
   const resolvedName =
     (full_name && String(full_name).trim()) ||
     (email && String(email).trim()) ||
     'User'
 
-  const { error } = await supabase.from('profiles').insert({
-    id,
-    role: normalizedRole,
-    email: email ?? null,
-    username: username && String(username).trim() ? String(username).trim() : null,
-    full_name: resolvedName,
-  })
+  // Using upsert with onConflict: 'id' is faster and more atomic than select-then-insert.
+  // We use the service role client (default in config/db.js) to bypass RLS.
+  const { error } = await supabase.from('profiles').upsert(
+    {
+      id,
+      role: normalizedRole,
+      email: email ?? null,
+      username: username && String(username).trim() ? String(username).trim() : null,
+      full_name: resolvedName,
+    },
+    { onConflict: 'id', ignoreDuplicates: true }
+  )
 
-  if (error && error.code !== '23505') {
+  if (error) {
+    console.error('❌ Failed to ensure profile row:', error)
     throw error
   }
 }
@@ -60,7 +63,13 @@ export const register = async (req, res, next) => {
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert(
-          { id: data.user.id, username, full_name: resolvedFullName, role: normalizedRole },
+          {
+            id: data.user.id,
+            username,
+            full_name: resolvedFullName,
+            role: normalizedRole,
+            email,
+          },
           { onConflict: 'id' }
         );
       if (profileError) {

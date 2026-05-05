@@ -64,8 +64,9 @@ const OrderTracking = () => {
     riderId: null,
   })
   const [hasAutoPrompted, setHasAutoPrompted] = useState(false)
+  const [queuedRestaurantId, setQueuedRestaurantId] = useState(null)
   const [ratingSubmitted, setRatingSubmitted] = useState({
-    restaurant: false,
+    restaurants: {},
     rider: false,
   })
 
@@ -76,7 +77,10 @@ const OrderTracking = () => {
   const orderStatus = order?.status
   const orderRiderId = order?.rider_id ?? null
   const restaurantGroups = groupItemsByRestaurant(items)
-  const firstRestaurantId = restaurantGroups.find((group) => group?.id && group.id !== 'unknown')?.id ?? null
+  const restaurantList = restaurantGroups.filter((group) => group?.id && group.id !== 'unknown')
+  const remainingRestaurantRatings = restaurantList.filter(
+    (group) => !ratingSubmitted.restaurants[group.id]
+  ).length
 
   const subtotal = items.reduce(
     (sum, i) => sum + Number(i.priceAtOrder || 0) * Number(i.quantity || 0),
@@ -87,26 +91,8 @@ const OrderTracking = () => {
 
   useEffect(() => {
     if (orderStatus !== 'delivered' || hasAutoPrompted) return
-    if (firstRestaurantId) {
-      setRatingModal({
-        isOpen: true,
-        type: 'restaurant',
-        restaurantId: firstRestaurantId,
-        riderId: orderRiderId,
-      })
-      setHasAutoPrompted(true)
-      return
-    }
-    if (orderRiderId) {
-      setRatingModal({
-        isOpen: true,
-        type: 'rider',
-        restaurantId: null,
-        riderId: orderRiderId,
-      })
-      setHasAutoPrompted(true)
-    }
-  }, [orderStatus, orderRiderId, firstRestaurantId, hasAutoPrompted])
+    setHasAutoPrompted(true)
+  }, [orderStatus, hasAutoPrompted])
 
   if (loading) {
     return (
@@ -202,6 +188,9 @@ const OrderTracking = () => {
             <p className="text-xs text-gray-500">
               Your rider · ⭐ {Number(rider.avgRating || 0).toFixed(1)}
             </p>
+            {rider.email && (
+              <p className="text-xs text-gray-500 truncate">{rider.email}</p>
+            )}
           </div>
           {rider.currentLat && rider.currentLng && (
             <a
@@ -263,23 +252,34 @@ const OrderTracking = () => {
             <p className="text-xs text-gray-500 mt-1">
               Ratings help restaurants and riders improve.
             </p>
+            {restaurantList.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                {remainingRestaurantRatings === 0
+                  ? 'All restaurants rated. Thank you!'
+                  : `${remainingRestaurantRatings} restaurant${remainingRestaurantRatings === 1 ? '' : 's'} left to rate.`}
+              </p>
+            )}
             <div className="mt-3 flex gap-2 flex-wrap">
-              {firstRestaurantId && (
-                <button
-                  onClick={() =>
-                    setRatingModal({
-                      isOpen: true,
-                      type: 'restaurant',
-                      restaurantId: firstRestaurantId,
-                      riderId: orderRiderId,
-                    })
-                  }
-                  className="px-3 py-2 text-xs font-semibold rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-60"
-                  disabled={ratingSubmitted.restaurant}
-                >
-                  {ratingSubmitted.restaurant ? 'Restaurant rated' : 'Rate restaurant'}
-                </button>
-              )}
+              {restaurantList.map((restaurant) => {
+                const isRated = Boolean(ratingSubmitted.restaurants[restaurant.id])
+                return (
+                  <button
+                    key={restaurant.id}
+                    onClick={() =>
+                      setRatingModal({
+                        isOpen: true,
+                        type: 'restaurant',
+                        restaurantId: restaurant.id,
+                        riderId: orderRiderId,
+                      })
+                    }
+                    className="px-3 py-2 text-xs font-semibold rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-60"
+                    disabled={isRated}
+                  >
+                    {isRated ? `${restaurant.name} rated` : `Rate ${restaurant.name}`}
+                  </button>
+                )
+              })}
               {orderRiderId && (
                 <button
                   onClick={() =>
@@ -310,18 +310,50 @@ const OrderTracking = () => {
         restaurantId={ratingModal.restaurantId}
         riderId={ratingModal.riderId}
         type={ratingModal.type}
-        onClose={() =>
+        onClose={() => {
+          if (queuedRestaurantId) {
+            setRatingModal({
+              isOpen: true,
+              type: 'restaurant',
+              restaurantId: queuedRestaurantId,
+              riderId: orderRiderId,
+            })
+            setQueuedRestaurantId(null)
+            return
+          }
+
           setRatingModal((prev) => ({
             ...prev,
             isOpen: false,
           }))
-        }
-        onSubmit={() =>
-          setRatingSubmitted((prev) => ({
-            ...prev,
-            [ratingModal.type]: true,
-          }))
-        }
+        }}
+        onSubmit={() => {
+          if (ratingModal.type === 'restaurant' && ratingModal.restaurantId) {
+            const nextRestaurant = restaurantList.find(
+              (group) =>
+                group.id !== ratingModal.restaurantId &&
+                !ratingSubmitted.restaurants[group.id]
+            )
+            if (nextRestaurant) {
+              setQueuedRestaurantId(nextRestaurant.id)
+            }
+            setRatingSubmitted((prev) => ({
+              ...prev,
+              restaurants: {
+                ...prev.restaurants,
+                [ratingModal.restaurantId]: true,
+              },
+            }))
+            return
+          }
+
+          if (ratingModal.type === 'rider') {
+            setRatingSubmitted((prev) => ({
+              ...prev,
+              rider: true,
+            }))
+          }
+        }}
       />
     </div>
   )

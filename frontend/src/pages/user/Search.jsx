@@ -62,7 +62,10 @@ const Search = () => {
 
     const saved = parseLatLng(user?.delivery_lat, user?.delivery_lng)
     if (saved) {
-      setMapLocation(saved)
+      setMapLocation((prev) => {
+        if (prev.lat === saved.lat && prev.lng === saved.lng) return prev
+        return saved
+      })
       setLocationStatus('saved')
       return
     }
@@ -76,12 +79,14 @@ const Search = () => {
     setLocationStatus('detecting')
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setMapLocation(
-          normalizeMapLocation(
-            { lat: pos.coords.latitude, lng: pos.coords.longitude },
-            DHAKA_DEFAULT
-          )
+        const gps = normalizeMapLocation(
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          DHAKA_DEFAULT
         )
+        setMapLocation((prev) => {
+          if (prev.lat === gps.lat && prev.lng === gps.lng) return prev
+          return gps
+        })
         setLocationStatus('gps')
       },
       () => {

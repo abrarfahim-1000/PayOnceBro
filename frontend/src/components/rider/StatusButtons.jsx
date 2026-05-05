@@ -97,10 +97,6 @@ const StatusButtons = ({ orderId, currentStatus, onStatusUpdate, disabled = fals
         </button>
       </div>
 
-      <div className="text-xs text-gray-500 text-center">
-        Current: <span className="font-semibold">{currentStatus}</span> →{' '}
-        <span className="font-semibold">{nextStatus}</span>
-      </div>
     </div>
   )
 }

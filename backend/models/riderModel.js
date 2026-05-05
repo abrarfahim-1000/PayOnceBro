@@ -54,6 +54,17 @@ export const getAvailable = async () => {
   return data ?? []
 }
 
+export const getAllWithLocation = async () => {
+  const { data, error } = await supabase
+    .from('riders')
+    .select('id, user_id, current_lat, current_lng, is_available, avg_rating, total_deliveries')
+    .not('current_lat', 'is', null)
+    .not('current_lng', 'is', null)
+
+  if (error) throw error
+  return data ?? []
+}
+
 /**
  * updateLocationByUserId — update rider coords using user_id.
  */
@@ -144,4 +155,62 @@ export const updateRating = async (riderId, avgRating) => {
 
   if (error) throw error
   return data
+}
+
+export const getByIdsWithProfiles = async (riderIds = []) => {
+  if (!Array.isArray(riderIds) || riderIds.length === 0) return []
+
+  const { data: riders, error: riderError } = await supabase
+    .from('riders')
+    .select('id, user_id')
+    .in('id', riderIds)
+
+  if (riderError) throw riderError
+  const rows = riders ?? []
+  const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))]
+
+  let profilesById = {}
+  if (userIds.length > 0) {
+    const { data: profiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, full_name, username, email')
+      .in('id', userIds)
+
+    if (profileError) throw profileError
+    profilesById = (profiles ?? []).reduce((acc, profile) => {
+      acc[profile.id] = profile
+      return acc
+    }, {})
+  }
+
+  const enriched = await Promise.all(
+    rows.map(async (rider) => {
+      const baseProfile = profilesById[rider.user_id] || null
+      let fullName = baseProfile?.full_name || baseProfile?.username || null
+      let email = baseProfile?.email || null
+
+      if ((!fullName || !email) && rider.user_id) {
+        try {
+          const { data, error } = await supabase.auth.admin.getUserById(rider.user_id)
+          if (!error && data?.user) {
+            const metaName = data.user.user_metadata?.full_name || data.user.user_metadata?.name
+            fullName = fullName || metaName || (data.user.email ? data.user.email.split('@')[0] : null)
+            email = email || data.user.email || null
+          }
+        } catch {
+          // Best-effort enrichment only.
+        }
+      }
+
+      return {
+        ...rider,
+        profile: {
+          full_name: fullName,
+          email,
+        },
+      }
+    })
+  )
+
+  return enriched
 }

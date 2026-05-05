@@ -2,6 +2,11 @@
  * Haversine distance (km) — mirrors backend/utils/geoUtils.js for browser use.
  */
 export const haversineKm = (lat1, lng1, lat2, lng2) => {
+  // Sanity check for Null Island (0,0) — uninitialized coordinates
+  if ((lat1 === 0 && lng1 === 0) || (lat2 === 0 && lng2 === 0)) {
+    return 0
+  }
+
   const R = 6371
   const dLat = ((lat2 - lat1) * Math.PI) / 180
   const dLng = ((lng2 - lng1) * Math.PI) / 180
@@ -10,7 +15,10 @@ export const haversineKm = (lat1, lng1, lat2, lng2) => {
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  
+  // Cap at 100km for UI sanity
+  return Math.min(dist, 100)
 }
 
 /** Valid WGS84 point for map use, or null (missing / placeholder / null island). */

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
@@ -71,15 +72,13 @@ const FoodCard = ({ item, onAddToCart }) => {
         {/* Restaurant info / Distance */}
         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 truncate">
+            <Link 
+               to={`/restaurants/${restaurant.id}`}
+               className="flex items-center gap-1.5 truncate hover:text-orange-600 transition-colors"
+            >
                <span className="text-sm">🍽️</span>
                <span className="truncate">{restaurant.name}</span>
-            </div>
-            {restaurant.avgRating > 0 && (
-              <span className="flex items-center gap-0.5 text-amber-500 font-medium shrink-0 ml-2">
-                ⭐ {Number(restaurant.avgRating).toFixed(1)}
-              </span>
-            )}
+            </Link>
           </div>
           
           {distanceKm !== null && (
@@ -115,3 +114,4 @@ const FoodCard = ({ item, onAddToCart }) => {
 }
 
 export default FoodCard
+

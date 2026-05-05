@@ -35,3 +35,15 @@ export const assignRider = async (clusterId, riderId) => {
   if (error) throw error
   return data
 }
+
+export const updateRestaurantIds = async (clusterId, restaurantIds = []) => {
+  const { data, error } = await supabase
+    .from('clusters')
+    .update({ restaurant_ids: restaurantIds })
+    .eq('id', clusterId)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return data
+}

@@ -60,14 +60,18 @@ const Cart = () => {
   const [manualLat, setManualLat] = useState('')
   const [manualLng, setManualLng] = useState('')
 
+  const userId = user?.id
+  const userRole = user?.role
+  const userDeliveryLat = user?.delivery_lat
+  const userDeliveryLng = user?.delivery_lng
+
   // Apply saved profile delivery location when available (overrides stale session storage).
   useEffect(() => {
-    if (!isSessionLoaded || !user || user.role !== 'user') return
-    const lat = Number(user.delivery_lat)
-    const lng = Number(user.delivery_lng)
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
-    setUserLocation(lat, lng)
-  }, [isSessionLoaded, user?.id, user?.role, user?.delivery_lat, user?.delivery_lng, setUserLocation])
+    if (!isSessionLoaded || !userId || userRole !== 'user') return
+    const parsed = parseLatLng(userDeliveryLat, userDeliveryLng)
+    if (!parsed) return
+    setUserLocation(parsed.lat, parsed.lng)
+  }, [isSessionLoaded, userId, userRole, userDeliveryLat, userDeliveryLng, setUserLocation])
 
   // Keep the local "granted" indicator in sync with context (covers the case
   // where location was set by another page — e.g. the map picker on Search).

@@ -15,7 +15,6 @@ import { toast } from 'sonner'
 const TABS = [
   { key: 'pending',   label: 'New Orders' },
   { key: 'preparing', label: 'Preparing' },
-  { key: 'pickup',    label: 'Ready for Pickup' },
   { key: 'completed', label: 'Completed Today' },
 ]
 

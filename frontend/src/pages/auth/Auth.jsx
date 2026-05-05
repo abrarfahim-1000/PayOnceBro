@@ -13,7 +13,7 @@ import { getRoleHome } from '../../utils/roleHome'
 const Auth = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { user, isAuthenticated, isSessionLoaded } = UrlState()
+  const { user, isAuthenticated, authSyncing, isSessionLoaded } = UrlState()
   const [activeForm, setActiveForm] = useState(
     searchParams.get('createNew') ? 'login' : null
   )
@@ -57,9 +57,9 @@ const Auth = () => {
   }, [isMobileView])
 
   useEffect(() => {
-    if (!isSessionLoaded || !isAuthenticated || !user) return
+    if (!isSessionLoaded || authSyncing || !isAuthenticated || !user) return
     navigate(getRoleHome(user?.role), { replace: true })
-  }, [isSessionLoaded, isAuthenticated, user, navigate])
+  }, [isSessionLoaded, authSyncing, isAuthenticated, user, navigate])
 
   if (isSessionLoaded && isAuthenticated && user) {
     return null

@@ -1,5 +1,5 @@
 // frontend/src/context/CartContext.jsx
-import { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react'
+import { createContext, useContext, useReducer, useEffect, useRef, useCallback, useMemo } from 'react'
 import { checkCluster, getDeliveryFee } from '../services/deliveryService'
 
 const CART_SESSION_KEY = 'payoncebro_cart_session_v1'
@@ -74,8 +74,13 @@ const cartReducer = (state, action) => {
     }
     case 'CLEAR_CART':
       return { ...INITIAL_STATE, userLocation: state.userLocation }
-    case 'SET_USER_LOCATION':
+    case 'SET_USER_LOCATION': {
+      const { lat, lng } = action.payload
+      if (state.userLocation?.lat === lat && state.userLocation?.lng === lng) {
+        return state
+      }
       return { ...state, userLocation: action.payload }
+    }
     case 'SET_CHECKING_CLUSTER':
       return { ...state, checkingCluster: action.payload }
     case 'SET_CLUSTER_STATUS':
@@ -93,20 +98,21 @@ export const CartProvider = ({ children }) => {
   const [state, dispatch] = useReducer(cartReducer, INITIAL_STATE, loadInitialCartState)
   const debounceTimer = useRef(null)
 
-  const subtotal      = state.items.reduce((s, i) => s + i.price * i.quantity, 0)
-  const restaurantIds = [...new Set(state.items.map((i) => i.restaurantId))]
+  const subtotal      = useMemo(() => state.items.reduce((s, i) => s + i.price * i.quantity, 0), [state.items])
+  const restaurantIds = useMemo(() => [...new Set(state.items.map((i) => i.restaurantId))], [state.items])
   const deliveryFee   = state.clusterStatus.deliveryFee?.fee ?? 0
   const total         = subtotal + deliveryFee
-  const itemCount     = state.items.reduce((s, i) => s + i.quantity, 0)
-  const itemsByRestaurant = state.items.reduce((acc, item) => {
+  const itemCount     = useMemo(() => state.items.reduce((s, i) => s + i.quantity, 0), [state.items])
+  const itemsByRestaurant = useMemo(() => state.items.reduce((acc, item) => {
     if (!acc[item.restaurantId]) {
       acc[item.restaurantId] = { restaurantId: item.restaurantId, restaurantName: item.restaurantName, items: [] }
     }
     acc[item.restaurantId].items.push(item)
     return acc
-  }, {})
+  }, {}), [state.items])
 
   const runClusterCheck = useCallback(async (items, location) => {
+    // ... rest of method unchanged
     const ids = [...new Set(items.map((i) => i.restaurantId))]
     if (ids.length === 0) {
       dispatch({ type: 'RESET_CLUSTER' })
@@ -197,15 +203,21 @@ export const CartProvider = ({ children }) => {
   const removeItem     = (menuItemId) => dispatch({ type: 'REMOVE_ITEM', payload: menuItemId })
   const updateQuantity = (menuItemId, quantity) => dispatch({ type: 'UPDATE_QUANTITY', payload: { menuItemId, quantity } })
   const clearCart      = () => dispatch({ type: 'CLEAR_CART' })
-  const setUserLocation = (lat, lng) => dispatch({ type: 'SET_USER_LOCATION', payload: { lat, lng } })
+  const setUserLocation = useCallback((lat, lng) => dispatch({ type: 'SET_USER_LOCATION', payload: { lat, lng } }), [])
+
+  const value = useMemo(() => ({
+    items: state.items, clusterStatus: state.clusterStatus,
+    userLocation: state.userLocation, checkingCluster: state.checkingCluster,
+    subtotal, deliveryFee, total, restaurantIds, itemsByRestaurant, itemCount,
+    addItem, removeItem, updateQuantity, clearCart, setUserLocation,
+  }), [
+    state.items, state.clusterStatus, state.userLocation, state.checkingCluster,
+    subtotal, deliveryFee, total, restaurantIds, itemsByRestaurant, itemCount,
+    setUserLocation
+  ])
 
   return (
-    <CartContext.Provider value={{
-      items: state.items, clusterStatus: state.clusterStatus,
-      userLocation: state.userLocation, checkingCluster: state.checkingCluster,
-      subtotal, deliveryFee, total, restaurantIds, itemsByRestaurant, itemCount,
-      addItem, removeItem, updateQuantity, clearCart, setUserLocation,
-    }}>
+    <CartContext.Provider value={value}>
       {children}
     </CartContext.Provider>
   )

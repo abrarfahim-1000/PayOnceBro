@@ -7,17 +7,24 @@
 // Updates every 30 seconds on its own so the number feels live.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const TICK_MS = 30_000 // refresh every 30 seconds
 
-const OrderETABadge = ({ order }) => {
-  const [now, setNow] = useState(() => Date.now())
+const OrderETABadge = ({ order, now: nowProp }) => {
+  const shouldSelfTick = nowProp == null
+  const [internalNow, setInternalNow] = useState(() => Date.now())
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), TICK_MS)
+    if (!shouldSelfTick) return
+    const id = setInterval(() => setInternalNow(Date.now()), TICK_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [shouldSelfTick])
+
+  const now = useMemo(
+    () => (Number.isFinite(nowProp) ? nowProp : internalNow),
+    [nowProp, internalNow]
+  )
 
   if (!order) return null
   if (order.status === 'delivered' || order.status === 'cancelled') return null

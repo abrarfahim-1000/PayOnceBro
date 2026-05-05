@@ -18,6 +18,7 @@ const useOrderTracking = (orderId) => {
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const POLL_FALLBACK_MS = 30_000
 
   const refresh = useCallback(async () => {
     if (!orderId) return
@@ -80,6 +81,24 @@ const useOrderTracking = (orderId) => {
       supabase.removeChannel(orderChannel)
       supabase.removeChannel(historyChannel)
     }
+  }, [orderId, refresh])
+
+  // Refresh when tab becomes visible (helps after backgrounding)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [refresh])
+
+  // Poll fallback in case realtime is blocked
+  useEffect(() => {
+    if (!orderId) return
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') refresh()
+    }, POLL_FALLBACK_MS)
+    return () => clearInterval(intervalId)
   }, [orderId, refresh])
 
   return {

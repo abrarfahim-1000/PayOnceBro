@@ -63,15 +63,44 @@ const parseJsonArray = (text) => {
 }
 
 export const generateMenuTags = async (name, description) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H1',location:'backend/services/geminiService.js:generateMenuTags:entry',message:'generateMenuTags called',data:{hasModel:Boolean(model),nameLength:(name||'').length,descriptionLength:(description||'').length,timeoutMs:MODEL_TIMEOUT_MS},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  console.log('[geminiService] generateMenuTags called', {
+    hasModel: Boolean(model),
+    nameLength: (name || '').length,
+    descriptionLength: (description || '').length,
+    timeoutMs: MODEL_TIMEOUT_MS,
+  })
   if (!model) return []
 
   try {
     const prompt = `Given this menu item:\nName: ${name}\nDescription: ${description || ''}\n\nReturn ONLY a valid JSON array of applicable tags from:\n["vegan", "vegetarian", "halal", "spicy", "mild", "sweet", "gluten-free", "dairy-free", "high-protein", "low-calorie"]\n\nExample: ["halal", "spicy"]`
     const result = await withTimeout(model.generateContent(prompt))
     const text = result.response.text().trim()
+    console.log('[geminiService] Gemini raw response received', {
+      responsePreview: text.slice(0, 180),
+      responseLength: text.length,
+    })
+    // #region agent log
+    fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H2',location:'backend/services/geminiService.js:generateMenuTags:response',message:'Gemini raw response received',data:{responsePreview:text.slice(0,180),responseLength:text.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const parsed = parseJsonArray(text)
+    console.log('[geminiService] Gemini response parsed to allowed tags', {
+      parsedTags: parsed,
+      parsedCount: parsed.length,
+    })
+    // #region agent log
+    fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H2',location:'backend/services/geminiService.js:generateMenuTags:parsed',message:'Gemini response parsed to allowed tags',data:{parsedTags:parsed,parsedCount:parsed.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return parsed
-  } catch {
+  } catch (err) {
+    console.log('[geminiService] Gemini call failed, returning empty tag list', {
+      errorMessage: err?.message || String(err),
+    })
+    // #region agent log
+    fetch('http://127.0.0.1:7418/ingest/e23e83d9-a344-4b52-b5e9-54a81aa66b54',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'27b7b0'},body:JSON.stringify({sessionId:'27b7b0',runId:'pre-fix',hypothesisId:'H1',location:'backend/services/geminiService.js:generateMenuTags:catch',message:'Gemini call failed, returning empty tag list',data:{fallbackToEmpty:true},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return []
   }
 }

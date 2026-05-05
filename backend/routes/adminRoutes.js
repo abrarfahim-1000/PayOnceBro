@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import { protect } from '../middleware/authMiddleware.js'
 import { restrictTo } from '../middleware/roleMiddleware.js'
-import { getAnalytics, getDemandZones } from '../controllers/adminController.js'
 import { getAnalytics, backfillMenuAiTags, getDemandZones } from '../controllers/adminController.js'
 
 const router = Router()

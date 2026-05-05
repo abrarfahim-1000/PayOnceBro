@@ -32,11 +32,16 @@ export const findBestRider = async (orderId) => {
     }
     console.log(`📍 Order centroid: lat=${centroid.lat}, lng=${centroid.lng}`)
 
-    const availableRiders = await riderModel.getAvailable()
+    let availableRiders = await riderModel.getAvailable()
     console.log(`👥 Available riders: ${availableRiders.length}`)
 
     if (availableRiders.length === 0) {
-      console.warn(`No available riders for order ${orderId}`)
+      console.warn(`No available riders for order ${orderId}. Falling back to any rider with location.`)
+      availableRiders = await riderModel.getAllWithLocation()
+    }
+
+    if (availableRiders.length === 0) {
+      console.warn(`No riders with location data for order ${orderId}`)
       return null
     }
 

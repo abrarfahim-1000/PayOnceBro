@@ -131,15 +131,25 @@ export const getTrackingDetails = async (req, res, next) => {
         if (riderRow.user_id) {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('full_name, username')
+            .select('full_name, username, email')
             .eq('id', riderRow.user_id)
             .single()
           fullName = profile?.full_name || profile?.username || 'Rider'
+          rider = {
+            id: riderRow.id,
+            fullName,
+            email: profile?.email || null,
+            avgRating: Number(riderRow.avg_rating || 0),
+            currentLat: riderRow.current_lat ?? null,
+            currentLng: riderRow.current_lng ?? null,
+          }
+          return res.json({ order, items, cluster, rider })
         }
 
         rider = {
           id: riderRow.id,
           fullName,
+          email: null,
           avgRating: Number(riderRow.avg_rating || 0),
           currentLat: riderRow.current_lat ?? null,
           currentLng: riderRow.current_lng ?? null,

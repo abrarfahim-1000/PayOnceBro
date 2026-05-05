@@ -24,3 +24,4 @@ export const createAdminAlert = async (message, type = 'rider_rating_alert') => 
   if (error) throw error
   return data ?? []
 }
+

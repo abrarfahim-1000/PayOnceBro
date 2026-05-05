@@ -5,8 +5,8 @@ import { updateOrderStatus } from '../../services/restaurantService'
  * Shows contextual action buttons based on the current order status.
  *
  * pending   → Accept / Reject
- * accepted  → Mark Preparing / Cancel
- * preparing → (rider takes over from here — no restaurant action)
+ * accepted  → Mark Preparing / Reject
+ * preparing → Mark for delivery
  */
 const OrderActionButtons = ({ order, onStatusChange }) => {
   const [loading, setLoading] = useState(false)
@@ -34,7 +34,7 @@ const OrderActionButtons = ({ order, onStatusChange }) => {
           Accept
         </button>
         <button
-          onClick={() => handle('cancelled')}
+          onClick={() => handle('rejected')}
           disabled={loading}
           className="flex-1 py-1.5 rounded-md bg-red-100 text-red-700 text-sm font-medium hover:bg-red-200 disabled:opacity-50 transition-colors"
         >
@@ -55,11 +55,25 @@ const OrderActionButtons = ({ order, onStatusChange }) => {
           Mark Preparing
         </button>
         <button
-          onClick={() => handle('cancelled')}
+          onClick={() => handle('rejected')}
           disabled={loading}
           className="py-1.5 px-3 rounded-md bg-gray-100 text-gray-600 text-sm font-medium hover:bg-gray-200 disabled:opacity-50 transition-colors"
         >
-          Cancel
+          Reject
+        </button>
+      </div>
+    )
+  }
+
+  if (order.status === 'preparing') {
+    return (
+      <div className="flex gap-2 mt-3">
+        <button
+          onClick={() => handle('pickup')}
+          disabled={loading}
+          className="flex-1 py-1.5 rounded-md bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
+        >
+          Assign to rider
         </button>
       </div>
     )

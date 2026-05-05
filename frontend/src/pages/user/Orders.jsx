@@ -18,13 +18,16 @@
 // NOTHING in Member 2's code is touched — we only consume their modal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import useUserOrders from '../../hooks/useUserOrders'
 import OrderProgressBar from '../../components/user/OrderProgressBar'
 import OrderETABadge from '../../components/user/OrderETABadge'
 import RatingModal from '../../components/user/RatingModal' // Member 2's component — unchanged
+import { UrlState } from '../../context/AuthContext'
+
+const ETA_TICK_MS = 30_000
 
 const ACTIVE_STATUSES = new Set([
   'pending',
@@ -57,8 +60,16 @@ const statusPillColor = (status) => {
 }
 
 const Orders = () => {
-  const { data: orders, loading, error } = useUserOrders()
+  const { user } = UrlState()
+  const { data: orders, loading, error } = useUserOrders({ userId: user?.id })
   const [filter, setFilter] = useState('active') // 'active' | 'delivered' | 'all'
+
+  // Shared ticker so we don't create one interval per order badge.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ETA_TICK_MS)
+    return () => clearInterval(id)
+  }, [])
 
   // ─── Rating modal state (Member 2 integration — preserved) ─────────────
   const [ratingModal, setRatingModal] = useState({
@@ -215,7 +226,7 @@ const Orders = () => {
                   <div className="px-4 pt-4 pb-2">
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-xs font-semibold text-gray-500">Live progress</p>
-                      <OrderETABadge order={order} />
+                      <OrderETABadge order={order} now={now} />
                     </div>
                     <OrderProgressBar status={order.status} />
                   </div>

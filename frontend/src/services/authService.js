@@ -46,14 +46,24 @@ export async function signup({ email, password, role, username, full_name }) {
 }
 
 export async function getCurrentUser() {
-  try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return null
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) return null
 
-    const { data } = await api.get('/auth/me')
+  try {
+    const { data } = await api.get('/auth/me', {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    })
     return data.user
-  } catch {
-    return null
+  } catch (err) {
+    const status = err?.response?.status
+    // If it's a 401 (unauthorized) or 403 (forbidden), the session is truly dead.
+    if (status === 401 || status === 403) {
+      return null
+    }
+    // For 500s or network issues, we throw so the AuthContext preserves the optimistic user.
+    throw err
   }
 }
 
