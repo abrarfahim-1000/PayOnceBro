@@ -198,3 +198,54 @@ export const updateRestaurantProfile = async (restaurantId, fields) => {
   if (error) throw error
   return data
 }
+
+/**
+ * searchRestaurants — finds restaurants matching a search query + filters.
+ *
+ * @param {string} query      - what the user typed, e.g. "burger"
+ * @param {object} filters    - { cuisine, limit, offset }
+ * @returns { items: rows[], meta: { hasMore: boolean, nextOffset: number } }
+ */
+export const searchRestaurants = async (query = '', filters = {}) => {
+  const clampInt = (v, def, min, max) => {
+    const n = parseInt(v, 10)
+    if (Number.isNaN(n)) return def
+    return Math.min(Math.max(n, min), max)
+  }
+
+  const limit = clampInt(filters.limit, 50, 1, 100)
+  const offset = clampInt(filters.offset, 0, 0, 10_000)
+  const q = query?.trim() ?? ''
+
+  let dbQuery = supabase
+    .from('restaurants')
+    .select('id, name, lat, lng, avg_prep_time, avg_rating, address, cuisine, is_active')
+    .eq('is_active', true)
+
+  if (filters.cuisine && filters.cuisine.trim().length > 0) {
+    dbQuery = dbQuery.ilike('cuisine', `%${filters.cuisine.trim()}%`)
+  }
+
+  if (q) {
+    dbQuery = dbQuery.or(`name.ilike.%${q}%,address.ilike.%${q}%`)
+  }
+
+  // Use range query
+  const { data, error } = await dbQuery.range(offset, offset + limit)
+  
+  if (error) throw error
+
+  const raw = data ?? []
+  
+  // We asked for limit + 1 items to see if there is a next page
+  const hasMore = raw.length > limit
+  const page = raw.slice(0, limit)
+
+  return {
+    items: page,
+    meta: {
+      hasMore,
+      nextOffset: offset + page.length,
+    },
+  }
+}

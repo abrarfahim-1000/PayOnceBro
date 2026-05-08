@@ -97,6 +97,76 @@ export const search = async (req, res, next) => {
 }
 
 /**
+ * GET /api/search/restaurants
+ * Query params: q, cuisine, userLat, userLng, limit, offset
+ *
+ * Searches for restaurants by name/address.
+ */
+export const searchRestaurants = async (req, res, next) => {
+  try {
+    const { q = '', cuisine, userLat, userLng, limit, offset } = req.query
+
+    const pageLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100)
+    const pageOffset = Math.min(Math.max(parseInt(offset, 10) || 0, 0), 10_000)
+
+    const { items: rawRestaurants, meta } = await restaurantModel.searchRestaurants(q, {
+      cuisine,
+      limit: pageLimit,
+      offset: pageOffset,
+    })
+
+    const userLatNum = parseFloat(userLat)
+    const userLngNum = parseFloat(userLng)
+    const hasLocation = !isNaN(userLatNum) && !isNaN(userLngNum)
+
+    const CLUSTER_RADIUS_KM = parseFloat(process.env.CLUSTER_RADIUS_KM) || 2
+
+    const enriched = rawRestaurants.map((restaurant) => {
+      let distanceKm = null
+      let isClusterEligible = false
+
+      if (hasLocation && restaurant.lat != null && restaurant.lng != null) {
+        distanceKm = haversineDistance(
+          userLatNum,
+          userLngNum,
+          restaurant.lat,
+          restaurant.lng
+        )
+        isClusterEligible = distanceKm <= CLUSTER_RADIUS_KM
+      }
+
+      return {
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name,
+          address: restaurant.address,
+          lat: restaurant.lat,
+          lng: restaurant.lng,
+          avgRating: restaurant.avg_rating,
+          avgPrepTime: restaurant.avg_prep_time,
+          cuisine: restaurant.cuisine
+        },
+        distanceKm,
+        isClusterEligible,
+      }
+    })
+
+    const sorted = hasLocation
+      ? sortByProximity(enriched, userLatNum, userLngNum)
+      : [...enriched]
+
+    res.json({
+      results: sorted,
+      total: sorted.length,
+      hasMore: Boolean(meta?.hasMore),
+      nextOffset: meta?.nextOffset ?? pageOffset + sorted.length,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+/**
  * GET /api/search/categories
  * Returns all available food categories for the filter dropdown.
  */

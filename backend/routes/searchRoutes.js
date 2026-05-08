@@ -1,11 +1,14 @@
 import { Router } from 'express'
-import { search, getCategories, getSearchMap } from '../controllers/searchController.js'
+import { search, searchRestaurants, getCategories, getSearchMap } from '../controllers/searchController.js'
 import { protect } from '../middleware/authMiddleware.js'
 
 const router = Router()
 
 // GET /api/search?q=burger&minPrice=50&maxPrice=300&cuisine=fast-food&userLat=X&userLng=Y
 router.get('/', protect, search)
+
+// GET /api/search/restaurants?q=burger&cuisine=fast-food&userLat=X&userLng=Y
+router.get('/restaurants', protect, searchRestaurants)
 
 // GET /api/search/categories  — for the cuisine filter dropdown
 router.get('/categories', protect, getCategories)

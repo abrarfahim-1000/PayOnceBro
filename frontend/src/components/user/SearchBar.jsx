@@ -88,7 +88,7 @@ const SearchBar = ({ onSearch, categories = [], loading = false }) => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search for food... (e.g. burger, pasta, rice)"
+            placeholder="Search..."
             className="w-full pl-10 pr-10 h-11 bg-card"
           />
           {loading && (
